@@ -4,3 +4,6 @@ kafka-python
 scikit-learn
 numpy
 pandas
+joblib
+requests
+flask-cors

@@ -1,132 +1,94 @@
 from flask import Flask, request, jsonify
 from prometheus_client import Counter, Histogram, generate_latest
-from kafka import KafkaProducer, KafkaConsumer
-import json, time, uuid, logging, threading
-from model import HousePriceModel
+import logging
+from service import MLService
+from flask_cors import CORS
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
+CORS(app)  # 启用 CORS
+
+@app.after_request
+def after_request(response):
+    if 'X-Frame-Options' in response.headers:
+        del response.headers['X-Frame-Options']
+    return response
 
 # Prometheus metrics
-REQUEST_COUNT = Counter('model_inference_requests_total', 'Total inference requests')
-INFERENCE_LATENCY = Histogram('model_inference_latency_seconds', 'Inference latency in seconds')
+REQUEST_COUNT = Counter('model_inference_requests_total', 'Total inference requests',
+                       ['model_id'])  # Add model_id label
+INFERENCE_LATENCY = Histogram('model_inference_latency_seconds', 'Inference latency in seconds',
+                            ['model_id'])  # Add model_id label
 
-# 初始化模型
-model = HousePriceModel()
+# Initialize service
+ml_service = MLService()
 
-# Kafka producer with lazy init
-producer = None
+# Initialize metrics for existing models
+for model_id in ml_service.model_registry.keys():
+    REQUEST_COUNT.labels(model_id=model_id)
+    INFERENCE_LATENCY.labels(model_id=model_id)
 
-def get_producer():
-    global producer
-    if producer is None:
-        for i in range(10):
-            try:
-                producer = KafkaProducer(
-                    bootstrap_servers='kafka:9092',
-                    value_serializer=lambda v: json.dumps(v).encode('utf-8')
-                )
-                logging.info("✅ Kafka producer connected.")
-                break
-            except Exception as e:
-                logging.warning(f"❌ Kafka producer connect failed (attempt {i+1}/10): {e}")
-                time.sleep(5)
-    return producer
+@app.route("/upload_model", methods=["POST"])
+def upload_model():
+    model_id = request.form.get("model_id")
+    result, status_code = ml_service.handle_model_upload(model_id, request.files.get("file"))
+    
+    if status_code == 200:  # Only initialize metrics if upload was successful
+        REQUEST_COUNT.labels(model_id=model_id)
+        INFERENCE_LATENCY.labels(model_id=model_id)
+    
+    return jsonify(result), status_code
+
+@app.route("/deploy", methods=["POST"])
+def deploy():
+    data = request.get_json()
+    model_id = data.get("model_id")
+    environment = data.get("environment", "development")
+
+    if not model_id:
+        return jsonify({"error": "Missing model_id"}), 400
+
+    config = {
+        "environment": environment,
+        "resources": {
+            "cpu": "2 cores",
+            "memory": "8GB",
+            "gpu": "N/A"
+        }
+    }
+
+    return jsonify(*ml_service.deploy_model(model_id, config))
+
 
 @app.route("/predict", methods=["POST"])
-@INFERENCE_LATENCY.time()
 def predict():
-    start_time = time.time()
-    REQUEST_COUNT.inc()
+    data = request.get_json()
+    if data and "model_id" in data:
+        REQUEST_COUNT.labels(model_id=data["model_id"]).inc()
+        with INFERENCE_LATENCY.labels(model_id=data["model_id"]).time():
+            return jsonify(*ml_service.handle_prediction(data))
+    return jsonify({"error": "Invalid request"}), 400
 
-    try:
-        # 获取输入数据
-        data = request.get_json()
-        if not data or not isinstance(data, dict):
-            return jsonify({"error": "Invalid input format"}), 400
+@app.route("/models/status")
+def models_status():
+    """Get status of all registered models"""
+    return jsonify(*ml_service.get_models_status())
 
-        # 模型预测
-        prediction = model.predict(data)
-        latency = round(time.time() - start_time, 4)
-        
-        result = {
-            "prediction": prediction,
-            "latency": latency
-        }
+@app.route("/delete_model/<model_id>", methods=["DELETE"])
+def delete_model(model_id):
+    """Delete a model"""
+    return jsonify(*ml_service.delete_model(model_id))
 
-        # 发送日志到Kafka
-        log_data = {
-            "model_id": "california-housing",
-            "request_id": str(uuid.uuid4()),
-            "timestamp": int(time.time()),
-            "features": data,
-            "prediction": prediction,
-            "latency": latency,
-            "status": "success"
-        }
-
-        kafka_producer = get_producer()
-        if kafka_producer:
-            try:
-                future = kafka_producer.send("inference-logs", log_data)
-                record_metadata = future.get(timeout=10)
-                logging.info(f"✅ Message sent to topic={record_metadata.topic} partition={record_metadata.partition} offset={record_metadata.offset}")
-            except Exception as e:
-                logging.warning(f"❌ Kafka send failed: {e}")
-
-        return jsonify(result)
-
-    except Exception as e:
-        error_msg = str(e)
-        logging.error(f"❌ Prediction error: {error_msg}")
-        return jsonify({"error": error_msg}), 500
+@app.route("/stop_deployment/<model_id>", methods=["POST"])
+def stop_deployment(model_id):
+    """Stop a model deployment without deleting the model"""
+    return jsonify(*ml_service.stop_deployment(model_id))
 
 @app.route("/metrics")
 def metrics():
     return generate_latest(), 200, {'Content-Type': 'text/plain'}
 
-# Kafka consumer in background thread
-def consume_logs():
-    connected = False
-    while not connected:
-        logging.info("🔄 Trying to connect Kafka consumer...")
-        try:
-            consumer = KafkaConsumer(
-                'inference-logs',
-                bootstrap_servers='kafka:9092',
-                value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-                auto_offset_reset='earliest',
-                enable_auto_commit=True,
-                group_id='model-service-monitor-new',
-                request_timeout_ms=30000,
-                session_timeout_ms=10000
-            )
-
-            logging.info("✅ Kafka consumer connected and started.")
-            connected = True
-
-            for msg in consumer:
-                logging.info("🔥 Message received from topic: %s, partition: %d, offset: %d", 
-                           msg.topic, msg.partition, msg.offset)
-                log = msg.value
-                latency = log.get("latency", 0)
-                logging.info(f"📥 Consumed: model={log['model_id']}, prediction={log['prediction']:.2f}, latency={latency}s")
-                if latency > 1.0:
-                    logging.warning(f"🚨 High latency alert: {latency}s")
-
-        except Exception as e:
-            logging.warning(f"❌ Kafka consumer connection failed. Retrying in 5s... Error: {e}")
-            time.sleep(5)
-
-def start_consumer_thread():
-    t = threading.Thread(target=consume_logs, daemon=True)
-    t.start()
-
 if __name__ == "__main__":
-    start_consumer_thread()
     app.run(host="0.0.0.0", port=5000)
