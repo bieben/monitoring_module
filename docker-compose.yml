@@ -42,8 +42,13 @@ services:
     image: grafana/grafana
     ports:
       - "3000:3000"
-    networks:
-      - app-network
+    volumes:
+      - ./grafana/data:/var/lib/grafana
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
 
 networks:
   app-network:

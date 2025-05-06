@@ -1,0 +1,27 @@
+{
+    "latency_rules": {
+        "critical": 5.0,
+        "warning": 1.0,
+        "batch": 30.0
+    },
+    "error_rules": {
+        "max_error_rate": 0.05,
+        "consecutive_errors": 5,
+        "error_window": 100
+    },
+    "resource_rules": {
+        "cpu_threshold": 80.0,
+        "memory_threshold": 85.0,
+        "disk_threshold": 90.0
+    },
+    "model_performance_rules": {
+        "min_accuracy": 0.9,
+        "accuracy_drop_threshold": 0.05,
+        "feature_drift_threshold": 0.1
+    },
+    "health_rules": {
+        "max_startup_time": 300,
+        "healthcheck_interval": 60,
+        "dependency_timeout": 10
+    }
+}

@@ -3,13 +3,17 @@ import os
 import joblib
 import time
 import uuid
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List, Optional
 from kafka_client import KafkaClient
 from flask import jsonify
+from prometheus_client import Counter, Histogram, Gauge
+from alert_rules import AlertRules
+
 class MLService:
     def __init__(self):
         self.model_registry: Dict[str, Dict[str, Any]] = {}  # model_id -> {model, metadata}
         self.kafka_client = KafkaClient()
+        self.alert_rules = AlertRules()
         # Create models directory if it doesn't exist
         os.makedirs("models", exist_ok=True)
         # Sync model registry with files on startup
@@ -131,12 +135,23 @@ class MLService:
             prediction = float(model.predict([data["features"]])[0])
             latency = time.time() - start_time
 
-            # Update model statistics
+            # 检查延迟告警
+            latency_alerts = self.alert_rules.check_latency(model_id, latency)
+            self.alert_rules.process_alerts(latency_alerts)
+
+            # 更新模型统计信息
             model_info['prediction_count'] += 1
             model_info['avg_latency'] = (
                 (model_info['avg_latency'] * (model_info['prediction_count'] - 1) + latency)
                 / model_info['prediction_count']
             )
+
+            # 检查资源使用情况（这里需要实现实际的资源监控）
+            # TODO: 实现实际的资源监控逻辑
+            cpu_usage = 0.0  # 示例值，需要替换为实际监控值
+            memory_usage = 0.0  # 示例值，需要替换为实际监控值
+            resource_alerts = self.alert_rules.check_resource_usage(model_id, cpu_usage, memory_usage)
+            self.alert_rules.process_alerts(resource_alerts)
 
             result = {
                 "prediction": prediction,
@@ -150,6 +165,9 @@ class MLService:
             self._log_prediction(model_id, prediction, latency, data["features"])
             return result, 200
         except Exception as e:
+            # 记录错误并检查错误率
+            error_alerts = self.alert_rules.check_errors(model_id, error_type=str(type(e).__name__))
+            self.alert_rules.process_alerts(error_alerts)
             logging.error(f"Prediction failed for model {model_id}: {e}")
             return {"error": str(e)}, 500
 
@@ -242,4 +260,9 @@ class MLService:
             "latency": latency,
             "status": "success"
         }
-        self.kafka_client.send_log(log_data) 
+        
+        # 发送日志到 Kafka
+        if not self.kafka_client.send_log(log_data):
+            # 如果发送失败，触发依赖服务检查
+            dependency_alerts = self.alert_rules.check_system_health(model_id, ["kafka"])
+            self.alert_rules.process_alerts(dependency_alerts) 

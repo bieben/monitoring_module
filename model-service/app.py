@@ -10,12 +10,6 @@ logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 CORS(app)  # 启用 CORS
 
-@app.after_request
-def after_request(response):
-    if 'X-Frame-Options' in response.headers:
-        del response.headers['X-Frame-Options']
-    return response
-
 # Prometheus metrics
 REQUEST_COUNT = Counter('model_inference_requests_total', 'Total inference requests',
                        ['model_id'])  # Add model_id label
@@ -89,6 +83,46 @@ def stop_deployment(model_id):
 @app.route("/metrics")
 def metrics():
     return generate_latest(), 200, {'Content-Type': 'text/plain'}
+
+@app.route("/monitoring/config", methods=["GET"])
+def get_monitoring_config():
+    """获取监控配置"""
+    category = request.args.get('category')
+    key = request.args.get('key')
+    config = ml_service.alert_rules.get_config(category, key)
+    return jsonify(config)
+
+@app.route("/monitoring/config/<category>", methods=["PUT"])
+def update_monitoring_config(category):
+    """更新监控配置"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        if 'key' in data and 'value' in data:
+            # 更新单个配置项
+            success = ml_service.alert_rules.update_config(category, data['key'], data['value'])
+        else:
+            # 更新整个类别
+            success = ml_service.alert_rules.update_category(category, data)
+
+        if success:
+            return jsonify({"message": "Configuration updated successfully"})
+        else:
+            return jsonify({"error": "Failed to update configuration"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/monitoring/config/reset", methods=["POST"])
+def reset_monitoring_config():
+    """重置监控配置"""
+    category = request.args.get('category')
+    success = ml_service.alert_rules.reset_config(category)
+    if success:
+        return jsonify({"message": "Configuration reset successfully"})
+    else:
+        return jsonify({"error": "Failed to reset configuration"}), 400
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
