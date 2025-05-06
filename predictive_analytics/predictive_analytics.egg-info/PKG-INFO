@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: predictive_analytics
+Version: 0.1.0
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: prophet>=1.1.4
+Requires-Dist: scikit-learn>=1.3.0
+Requires-Dist: pulp>=2.7.0
+Requires-Dist: prometheus-api-client>=0.5.5
+Requires-Dist: kafka-python>=2.0.2
+Requires-Dist: flask>=2.3.0
+Requires-Dist: redis>=4.5.0
+Requires-Dist: joblib>=1.3.0
+Requires-Dist: python-dotenv>=1.0.0
+Dynamic: requires-dist

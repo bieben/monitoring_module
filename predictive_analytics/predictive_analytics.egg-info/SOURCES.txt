@@ -1,0 +1,17 @@
+README.md
+setup.py
+predictive_analytics.egg-info/PKG-INFO
+predictive_analytics.egg-info/SOURCES.txt
+predictive_analytics.egg-info/dependency_links.txt
+predictive_analytics.egg-info/requires.txt
+predictive_analytics.egg-info/top_level.txt
+src/__init__.py
+src/data_collectors.py
+src/optimizer.py
+src/predictive_analyzer.py
+src/predictors.py
+tests/__init__.py
+tests/test_analyzer.py
+tests/test_data.py
+tests/test_optimizer.py
+tests/test_predictors.py
