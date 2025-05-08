@@ -58,11 +58,22 @@ class PuLPOptimizer(BaseOptimizer):
             # 映射新指标到算法所需变量
             mapped_predictions = predictions.copy()
             if 'cpu_usage' not in mapped_predictions.columns and 'requests_total' in mapped_predictions.columns:
-                mapped_predictions['cpu_usage'] = mapped_predictions['requests_total']
+                # 将请求总数映射到合理的CPU使用率范围(0-100%)
+                # 使用sigmoid函数将任意请求数映射到0-100范围
+                max_request = mapped_predictions['requests_total'].max()
+                if max_request > 0:
+                    # 使用sigmoid函数，控制最大值在100以内
+                    mapped_predictions['cpu_usage'] = 100 * (mapped_predictions['requests_total'] / max_request) * 0.8  # 最大使用率控制在80%
+                    # 确保不会超过100%
+                    mapped_predictions['cpu_usage'] = mapped_predictions['cpu_usage'].clip(0, 100)
+                else:
+                    mapped_predictions['cpu_usage'] = 10  # 默认低负载
             if 'memory_usage' not in mapped_predictions.columns and 'latency_avg' in mapped_predictions.columns:
-                mapped_predictions['memory_usage'] = mapped_predictions['latency_avg']
+                # 将平均延迟映射到合理的内存使用范围
+                mapped_predictions['memory_usage'] = (mapped_predictions['latency_avg'] * 10).clip(0.1, 100)
             if 'network_io' not in mapped_predictions.columns and 'latency_p95' in mapped_predictions.columns:
-                mapped_predictions['network_io'] = mapped_predictions['latency_p95']
+                # 将P95延迟映射到网络IO
+                mapped_predictions['network_io'] = (mapped_predictions['latency_p95'] * 10).clip(0.1, 100)
             if 'latency' not in mapped_predictions.columns and 'latency_p99' in mapped_predictions.columns:
                 mapped_predictions['latency'] = mapped_predictions['latency_p99']
             
@@ -321,11 +332,22 @@ class PuLPOptimizer(BaseOptimizer):
         # 映射新指标到算法所需变量
         mapped_predictions = predictions.copy()
         if 'cpu_usage' not in mapped_predictions.columns and 'requests_total' in mapped_predictions.columns:
-            mapped_predictions['cpu_usage'] = mapped_predictions['requests_total']
+            # 将请求总数映射到合理的CPU使用率范围(0-100%)
+            # 使用sigmoid函数将任意请求数映射到0-100范围
+            max_request = mapped_predictions['requests_total'].max()
+            if max_request > 0:
+                # 使用sigmoid函数，控制最大值在100以内
+                mapped_predictions['cpu_usage'] = 100 * (mapped_predictions['requests_total'] / max_request) * 0.8  # 最大使用率控制在80%
+                # 确保不会超过100%
+                mapped_predictions['cpu_usage'] = mapped_predictions['cpu_usage'].clip(0, 100)
+            else:
+                mapped_predictions['cpu_usage'] = 10  # 默认低负载
         if 'memory_usage' not in mapped_predictions.columns and 'latency_avg' in mapped_predictions.columns:
-            mapped_predictions['memory_usage'] = mapped_predictions['latency_avg']
+            # 将平均延迟映射到合理的内存使用范围
+            mapped_predictions['memory_usage'] = (mapped_predictions['latency_avg'] * 10).clip(0.1, 100)
         if 'network_io' not in mapped_predictions.columns and 'latency_p95' in mapped_predictions.columns:
-            mapped_predictions['network_io'] = mapped_predictions['latency_p95']
+            # 将P95延迟映射到网络IO
+            mapped_predictions['network_io'] = (mapped_predictions['latency_p95'] * 10).clip(0.1, 100)
         if 'latency' not in mapped_predictions.columns and 'latency_p99' in mapped_predictions.columns:
             mapped_predictions['latency'] = mapped_predictions['latency_p99']
             

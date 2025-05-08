@@ -35,8 +35,8 @@ services:
   model-service:
     build: ./model-service
     ports:
-      - "5080:5000"
-      - "5055:5050"
+      - "5000:5000"
+      - "5050:5050"
       - "7000-7100:8000-8100"
     volumes:
       - ./model-service:/app

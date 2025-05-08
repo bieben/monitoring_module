@@ -1,11 +1,11 @@
 {
-  "test_model_1746683232": {
-    "model_id": "test_model_1746683232",
-    "port": 8000,
-    "url": "http://localhost:8000",
+  "model1": {
+    "model_id": "model1",
+    "port": 8003,
+    "url": "http://localhost:8003",
     "status": "healthy",
     "metadata": {
-      "upload_time": 1746683232.1116807,
+      "upload_time": 1746685080.0,
       "feature_count": 8
     },
     "features": [
@@ -18,16 +18,16 @@
       "Latitude",
       "Longitude"
     ],
-    "registered_at": 1746683233.229119,
-    "last_updated": 1746683877.9091232
+    "registered_at": 1746736478.32844,
+    "last_updated": 1746738953.9955814
   },
-  "test_model_1746683561": {
-    "model_id": "test_model_1746683561",
-    "port": 8000,
-    "url": "http://localhost:8000",
+  "model2": {
+    "model_id": "model2",
+    "port": 8004,
+    "url": "http://localhost:8004",
     "status": "healthy",
     "metadata": {
-      "upload_time": 1746683561.0,
+      "upload_time": 1746686640.0,
       "feature_count": 8
     },
     "features": [
@@ -40,7 +40,7 @@
       "Latitude",
       "Longitude"
     ],
-    "registered_at": 1746683562.312449,
-    "last_updated": 1746683877.9106705
+    "registered_at": 1746736484.1676059,
+    "last_updated": 1746738954.0048847
   }
 }
