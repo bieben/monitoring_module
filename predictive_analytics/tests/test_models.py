@@ -6,8 +6,8 @@ import pytest
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
-from src.models import ProphetModel, SklearnModel, ModelFactory
-from src.optimizers import PuLPOptimizer
+from predictive_analytics.src.models import ProphetModel, SklearnModel, ModelFactory
+from predictive_analytics.src.optimizers import PuLPOptimizer
 
 @pytest.fixture
 def sample_training_data(mock_config):

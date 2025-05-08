@@ -31,10 +31,10 @@ class PrometheusCollector(BaseCollector):
         
         # 设置指标查询
         self.metrics = {
-            'cpu_usage': self.config['metrics']['cpu_usage'],
-            'memory_usage': self.config['metrics']['memory_usage'],
-            'network_io': self.config['metrics']['network_io'],
-            'latency': self.config['metrics']['latency']
+            'requests_total': self.config['metrics']['requests_total'],
+            'latency_avg': self.config['metrics']['latency_avg'],
+            'latency_p95': self.config['metrics']['latency_p95'],
+            'latency_p99': self.config['metrics']['latency_p99']
         }
         
         # 设置URL
@@ -42,9 +42,9 @@ class PrometheusCollector(BaseCollector):
         
         # 设置重试参数
         self.retry_config = {
-            'max_retries': self.config.get('max_retries', 3),
+            'max_retries': self.config.get('retry_attempts', 3),
             'retry_delay': self.config.get('retry_delay', 1),
-            'timeout': self.config.get('timeout', 10)
+            'timeout': self.config.get('query_timeout', 30)
         }
     
     def _validate_config(self) -> bool:
@@ -61,7 +61,7 @@ class PrometheusCollector(BaseCollector):
         if not all(field in self.config for field in required_fields):
             raise ValueError("Missing required configuration fields")
             
-        required_metrics = {'cpu_usage', 'memory_usage', 'network_io', 'latency'}
+        required_metrics = {'requests_total', 'latency_avg', 'latency_p95', 'latency_p99'}
         if not all(metric in self.config['metrics'] for metric in required_metrics):
             raise ValueError("Missing required metrics in configuration")
             
@@ -105,14 +105,17 @@ class PrometheusCollector(BaseCollector):
             error_msg = "; ".join(errors)
             raise RuntimeError(f"Failed to collect any metrics: {error_msg}")
         
-        # 合并所有指标数据
-        result = pd.concat(all_metrics, axis=1)
+        # 创建一个包含所有数据的单一DataFrame
+        combined_df = pd.concat(all_metrics, ignore_index=True)
+        
+        # 确保没有重复列
+        combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
         
         # 验证数据
-        if not self._validate_data(result):
+        if not self._validate_data(combined_df):
             raise RuntimeError("Invalid metric data format")
         
-        return result
+        return combined_df
     
     def _query_prometheus_with_retry(self, query: str, start_time: datetime, end_time: datetime, step: str) -> Optional[Dict]:
         """
@@ -208,6 +211,7 @@ class PrometheusCollector(BaseCollector):
         for result in metric_data:
             # 提取标签信息
             labels = result.get('metric', {})
+            model_id = labels.get('model_id', 'unknown')
             
             # 处理数据点
             for timestamp, value in result['values']:
@@ -216,17 +220,32 @@ class PrometheusCollector(BaseCollector):
                         'timestamp': pd.to_datetime(timestamp, unit='s'),
                         'metric_name': metric_name,
                         'value': float(value),
-                        'labels': labels
+                        'model_id': model_id
                     })
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Error processing data point: {str(e)}")
                     continue
         
+        if not processed_data:
+            # 如果没有数据，返回空DataFrame
+            return pd.DataFrame(columns=['timestamp', 'metric_name', 'value', 'model_id'])
+            
         df = pd.DataFrame(processed_data)
         
         # 统一时间戳格式
         if 'data_validation' in self.config and 'timestamp_format' in self.config['data_validation']:
             df['timestamp'] = df['timestamp'].dt.strftime(self.config['data_validation']['timestamp_format'])
+        
+        # 处理重复标签 - 为每个时间戳、指标、模型组合添加一个唯一索引
+        if len(df) > 0:
+            # 确保没有重复的索引
+            df = df.reset_index(drop=True)
+            
+            # 如果有重复行，则按时间戳、指标名称和模型ID分组，取平均值
+            if df.duplicated(['timestamp', 'metric_name', 'model_id']).any():
+                df = df.groupby(['timestamp', 'metric_name', 'model_id']).agg({
+                    'value': 'mean'
+                }).reset_index()
         
         return df
     
@@ -253,4 +272,39 @@ class PrometheusCollector(BaseCollector):
                 
         except requests.exceptions.RequestException as e:
             logger.error(f"Error getting available metrics: {str(e)}")
-            return [] 
+            return []
+    
+    def _validate_data(self, data: pd.DataFrame) -> bool:
+        """
+        验证数据格式是否正确
+        
+        Args:
+            data: 要验证的数据
+            
+        Returns:
+            True 如果数据格式正确，否则 False
+        """
+        if data is None or data.empty:
+            logger.warning("Empty dataframe during data validation")
+            return False
+            
+        # 检查必要的列
+        required_columns = {'timestamp', 'metric_name', 'value', 'model_id'}
+        if not all(col in data.columns for col in required_columns):
+            missing = required_columns - set(data.columns)
+            logger.warning(f"Missing required columns: {missing}")
+            return False
+            
+        # 验证值的范围
+        if 'data_validation' in self.config and 'value_range' in self.config['data_validation']:
+            for metric_name, (min_val, max_val) in self.config['data_validation']['value_range'].items():
+                metric_data = data[data['metric_name'] == metric_name]
+                if not metric_data.empty:
+                    # 检查是否有超出范围的值
+                    out_of_range = metric_data[(metric_data['value'] < min_val) | (metric_data['value'] > max_val)]
+                    if not out_of_range.empty:
+                        logger.warning(f"Found {len(out_of_range)} values out of range for metric {metric_name}")
+                        # 修剪超出范围的值
+                        data.loc[data['metric_name'] == metric_name, 'value'] = data.loc[data['metric_name'] == metric_name, 'value'].clip(min_val, max_val)
+        
+        return True 

@@ -7,3 +7,8 @@ scrape_configs:
     static_configs:
       - targets: ['model-service:5000']
     metrics_path: '/metrics'
+
+  - job_name: 'predictive-analytics'
+    static_configs:
+      - targets: ['predictive-analytics:5000']
+    metrics_path: '/metrics'

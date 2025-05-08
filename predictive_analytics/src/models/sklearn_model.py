@@ -34,7 +34,7 @@ class SklearnModel(BaseModel):
         # 初始化模型参数
         self.models = {}  # 每个指标一个模型
         self.scalers = {}  # 每个指标一个标准化器
-        self.metrics = ['cpu_usage', 'memory_usage', 'network_io', 'latency']
+        self.metrics = ['requests_total', 'latency_avg', 'latency_p95', 'latency_p99']
         self.lookback = self.config.get('lookback', 12)  # 用于预测的历史点数
         self.is_trained = False
         
@@ -67,12 +67,13 @@ class SklearnModel(BaseModel):
         Args:
             data: Training data DataFrame
         """
-        if not self._validate_data(data):
+        processed_data = self._validate_data(data)
+        if processed_data is None:
             raise ValueError("Invalid input data")
         
         try:
             # 准备特征
-            prepared_data = self._prepare_features(data)
+            prepared_data = self._prepare_features(processed_data)
             
             for metric in self.metrics:
                 # 准备训练数据
@@ -162,7 +163,7 @@ class SklearnModel(BaseModel):
             })
             
             # 确保所有必需的列都存在
-            for metric in ['cpu_usage', 'memory_usage', 'network_io', 'latency']:
+            for metric in ['requests_total', 'latency_avg', 'latency_p95', 'latency_p99']:
                 if metric not in result.columns:
                     result[metric] = 0.0
             
@@ -182,7 +183,11 @@ class SklearnModel(BaseModel):
         Returns:
             DataFrame with prepared features
         """
-        df = data.copy()
+        # 从原始数据提取指标
+        if 'metric_name' in data.columns and 'value' in data.columns:
+            df = self._extract_metrics_from_raw_data(data)
+        else:
+            df = data.copy()
         
         # 转换时间戳
         df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -345,4 +350,111 @@ class SklearnModel(BaseModel):
             logger.info(f"Model loaded from {path}")
         except Exception as e:
             logger.error(f"Error loading model: {str(e)}")
-            raise RuntimeError(f"Failed to load model: {str(e)}") 
+            raise RuntimeError(f"Failed to load model: {str(e)}")
+    
+    def _validate_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Validate input data format and correct if needed
+        
+        Args:
+            data: Input DataFrame
+            
+        Returns:
+            Processed and validated DataFrame or None if invalid
+        """
+        # 检查数据格式
+        if not isinstance(data, pd.DataFrame):
+            logger.error("Input must be a pandas DataFrame")
+            return None
+            
+        if data.empty:
+            logger.error("Input DataFrame is empty")
+            return None
+        
+        # 从原始数据提取所需指标
+        processed_df = self._extract_metrics_from_raw_data(data)
+        
+        # 验证处理后的数据是否包含所需的列
+        required_columns = {'timestamp'}.union(set(self.metrics))
+        if not all(col in processed_df.columns for col in required_columns):
+            logger.error(f"Missing required columns. Required: {required_columns}")
+            return None
+        
+        # 验证时间戳
+        try:
+            pd.to_datetime(processed_df['timestamp'])
+        except:
+            logger.error("Column timestamp must be datetime")
+            return None
+                
+        # 验证指标数据类型和范围
+        for metric in self.metrics:
+            if not pd.api.types.is_numeric_dtype(processed_df[metric]):
+                logger.error(f"Column {metric} must be numeric")
+                return None
+                
+            value_range = self.data_validation['value_range'].get(metric)
+            if value_range:
+                # 检查是否有超出范围的值
+                out_of_range = processed_df[(processed_df[metric] < value_range[0]) | (processed_df[metric] > value_range[1])]
+                if not out_of_range.empty:
+                    logger.warning(f"Found {len(out_of_range)} values out of range for metric {metric}. Clipping to range {value_range}")
+                    # 修剪超出范围的值
+                    processed_df[metric] = processed_df[metric].clip(value_range[0], value_range[1])
+                
+        return processed_df
+    
+    def _extract_metrics_from_raw_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        从原始数据中提取每个指标，并转换为适合模型的格式
+        
+        Args:
+            data: 原始数据，包含metric_name, value, timestamp, model_id列
+            
+        Returns:
+            DataFrame，每个指标作为一列，包含timestamp和所有指标值
+        """
+        if 'metric_name' not in data.columns or 'value' not in data.columns or 'timestamp' not in data.columns:
+            logger.error("Raw data must contain metric_name, value, and timestamp columns")
+            return pd.DataFrame()
+        
+        # 确保timestamp是datetime类型
+        data['timestamp'] = pd.to_datetime(data['timestamp'])
+        
+        # 创建结果DataFrame
+        result_df = pd.DataFrame()
+        
+        # 按模型ID分组处理（如果存在)
+        if 'model_id' in data.columns:
+            # 为简化起见，我们只使用第一个模型ID的数据
+            first_model_id = data['model_id'].iloc[0]
+            data = data[data['model_id'] == first_model_id]
+        
+        # 获取所有不同的时间戳
+        unique_timestamps = data['timestamp'].unique()
+        result_df['timestamp'] = unique_timestamps
+        
+        # 对于每个指标，提取数据并添加到结果DataFrame中
+        for metric in self.metrics:
+            metric_data = data[data['metric_name'] == metric]
+            if not metric_data.empty:
+                # 为每个时间戳取一个值（可能需要更复杂的聚合）
+                metric_df = metric_data.groupby('timestamp')['value'].mean().reset_index()
+                metric_df.columns = ['timestamp', metric]
+                
+                # 合并到结果DataFrame
+                result_df = pd.merge(result_df, metric_df, on='timestamp', how='left')
+        
+        # 确保所有指标列都存在，如果不存在则创建并填充0
+        for metric in self.metrics:
+            if metric not in result_df.columns:
+                result_df[metric] = 0.0
+        
+        # 按时间戳排序
+        result_df = result_df.sort_values('timestamp')
+        
+        # 处理缺失值
+        for metric in self.metrics:
+            result_df[metric] = result_df[metric].interpolate(method='linear')
+        
+        return result_df 

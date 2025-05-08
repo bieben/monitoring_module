@@ -1,0 +1,41 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# 告警规则（可选）
+rule_files:
+  # - "model_alerts.yml"
+
+# 抓取配置
+scrape_configs:
+  # 主模型服务
+  - job_name: 'model-service'
+    static_configs:
+      - targets: ['localhost:5000']
+        labels:
+          service: 'model-service'
+  
+  # 模型注册中心
+  - job_name: 'model-registry'
+    static_configs:
+      - targets: ['localhost:5050']
+        labels:
+          service: 'model-registry'
+  
+  # 动态发现模型服务
+  - job_name: 'model-instances'
+    scrape_interval: 10s
+    file_sd_configs:
+      - files:
+        - '/etc/prometheus/targets/model_targets.json'
+        refresh_interval: 5s
+
+  # 服务发现API（替代方案，从注册中心获取模型服务列表）
+  - job_name: 'model-instances-api'
+    scrape_interval: 10s
+    metrics_path: '/metrics'
+    params:
+      service: ['model-service']
+    http_sd_configs:
+      - url: 'http://localhost:5050/services/targets'
+        refresh_interval: 10s 

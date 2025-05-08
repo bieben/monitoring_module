@@ -13,8 +13,8 @@ def create_app():
     # Initialize Flask app
     app = Flask(__name__)
     
-    # Enable CORS
-    CORS(app)
+    # Enable CORS with more specific configuration
+    CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
     
     # Configure logging
     logging.basicConfig(

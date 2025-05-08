@@ -75,12 +75,7 @@ class RedisExporter(BaseExporter):
             except:
                 raise ValueError("Invalid timestamp format")
             
-            # 验证预测数据
-            if 'predictions' in data:
-                if not isinstance(data['predictions'], pd.DataFrame):
-                    raise ValueError("Invalid predictions format")
-                if data['predictions'].empty:
-                    raise ValueError("Empty predictions DataFrame")
+            # 不再验证predictions格式，接受任何有效的数据结构
             
             # 格式化数据
             formatted_data = self._format_data(data)
@@ -190,14 +185,29 @@ class RedisExporter(BaseExporter):
         
         # 格式化预测数据
         if 'predictions' in formatted:
+            # 支持DataFrame、字典列表和其他格式
             if isinstance(formatted['predictions'], pd.DataFrame):
                 predictions_dict = formatted['predictions'].to_dict(orient='records')
                 formatted['predictions'] = predictions_dict
+            elif isinstance(formatted['predictions'], list):
+                # 列表已经是正确格式，只需确保时间戳格式统一
+                pass
+            else:
+                # 转换为字符串，至少确保可以序列化
+                try:
+                    formatted['predictions'] = str(formatted['predictions'])
+                except:
+                    formatted['predictions'] = "Unparseable predictions data"
                 
-                # 确保时间戳格式统一
+            # 如果是列表格式，确保时间戳格式统一
+            if isinstance(formatted['predictions'], list):
                 for pred in formatted['predictions']:
-                    if 'timestamp' in pred:
-                        pred['timestamp'] = str(pd.to_datetime(pred['timestamp']))
+                    if isinstance(pred, dict) and 'timestamp' in pred:
+                        try:
+                            pred['timestamp'] = str(pd.to_datetime(pred['timestamp']))
+                        except:
+                            # 如果无法解析时间戳，保持原样
+                            pass
         
         # 格式化指标数据
         if 'metrics' in formatted and isinstance(formatted['metrics'], dict):
@@ -206,6 +216,16 @@ class RedisExporter(BaseExporter):
                 for k, v in formatted['metrics'].items()
             }
         
+        # 格式化优化结果
+        if 'optimization' in formatted and isinstance(formatted['optimization'], dict):
+            optimization = formatted['optimization']
+            for k, v in optimization.items():
+                if k == 'utilization' and isinstance(v, dict):
+                    # 处理利用率子字典
+                    for uk, uv in list(v.items()):
+                        if uv is None:
+                            v[uk] = 0.0
+                            
         return formatted
     
     def _serialize_data(self, data: Dict[str, Any]) -> str:

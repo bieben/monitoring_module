@@ -5,6 +5,13 @@ services:
     image: wurstmeister/zookeeper
     ports:
       - "2181:2181"
+    healthcheck:
+      test: echo srvr | nc localhost 2181 || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - app-network
 
   kafka:
     image: wurstmeister/kafka
@@ -15,19 +22,60 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_CREATE_TOPICS: "inference-logs:1:1"
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: kafka-topics.sh --list --bootstrap-server localhost:9092 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
 
   model-service:
     build: ./model-service
     ports:
-      - "5000:5000"
+      - "5080:5000"
+      - "5055:5050"
+      - "7000-7100:8000-8100"
     volumes:
       - ./model-service:/app
     environment:
       - PROMETHEUS_MULTIPROC_DIR=/tmp
+      - KAFKA_ENABLED=false
+      - MODEL_SERVICE_PORT_START=8000
+      - MODEL_SERVICE_PORT_END=8100
     command: python app.py
+    networks:
+      - app-network
+
+  predictive-analytics:
+    build: ./predictive_analytics
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./predictive_analytics:/app
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - FLASK_APP=wsgi.py
+      - FLASK_ENV=production
+      - LOG_LEVEL=INFO
     depends_on:
-      - kafka
+      prometheus:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: curl -f http://localhost:5000/api/v1/health || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
 
   prometheus:
     image: prom/prometheus
@@ -37,6 +85,13 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
+    healthcheck:
+      test: wget -q --spider http://localhost:9090/-/healthy || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
 
   grafana:
     image: grafana/grafana
@@ -49,6 +104,30 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     depends_on:
       - prometheus
+    healthcheck:
+      test: wget -q --spider http://localhost:3000/api/health || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
+
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: redis-cli ping || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - app-network
+
+volumes:
+  redis_data:
 
 networks:
   app-network:

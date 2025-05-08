@@ -1,0 +1,46 @@
+{
+  "test_model_1746683232": {
+    "model_id": "test_model_1746683232",
+    "port": 8000,
+    "url": "http://localhost:8000",
+    "status": "healthy",
+    "metadata": {
+      "upload_time": 1746683232.1116807,
+      "feature_count": 8
+    },
+    "features": [
+      "MedInc",
+      "HouseAge",
+      "AveRooms",
+      "AveBedrms",
+      "Population",
+      "AveOccup",
+      "Latitude",
+      "Longitude"
+    ],
+    "registered_at": 1746683233.229119,
+    "last_updated": 1746683877.9091232
+  },
+  "test_model_1746683561": {
+    "model_id": "test_model_1746683561",
+    "port": 8000,
+    "url": "http://localhost:8000",
+    "status": "healthy",
+    "metadata": {
+      "upload_time": 1746683561.0,
+      "feature_count": 8
+    },
+    "features": [
+      "MedInc",
+      "HouseAge",
+      "AveRooms",
+      "AveBedrms",
+      "Population",
+      "AveOccup",
+      "Latitude",
+      "Longitude"
+    ],
+    "registered_at": 1746683562.312449,
+    "last_updated": 1746683877.9106705
+  }
+}

@@ -43,7 +43,7 @@ class ProphetModel(BaseModel):
         
         # 初始化模型
         self.models = {}
-        self.metrics = ['cpu_usage', 'memory_usage', 'network_io', 'latency']
+        self.metrics = ['requests_total', 'latency_avg', 'latency_p95', 'latency_p99']
         self.data_validation = self.config.get('data_validation', {})
         self.is_trained = False
     
@@ -73,10 +73,11 @@ class ProphetModel(BaseModel):
         Args:
             data: Training data DataFrame
         """
-        if not self._validate_data(data):
+        processed_data = self._validate_data(data)
+        if processed_data is None:
             raise ValueError("Invalid input data")
             
-        data = self._prepare_data(data)
+        data = self._prepare_data(processed_data)
         
         try:
             for metric in self.metrics:
@@ -89,8 +90,12 @@ class ProphetModel(BaseModel):
                 # 验证数据范围
                 value_range = self.data_validation['value_range'].get(metric)
                 if value_range:
-                    if not df['y'].between(value_range[0], value_range[1]).all():
-                        raise ValueError(f"{metric} values out of valid range: {value_range}")
+                    # 检查是否有超出范围的值
+                    out_of_range = df[(df['y'] < value_range[0]) | (df['y'] > value_range[1])]
+                    if not out_of_range.empty:
+                        logger.warning(f"Found {len(out_of_range)} values out of range for metric {metric}. Clipping to range {value_range}")
+                        # 修剪超出范围的值
+                        df['y'] = df['y'].clip(value_range[0], value_range[1])
                 
                 # 初始化并训练模型
                 model = Prophet(
@@ -172,49 +177,112 @@ class ProphetModel(BaseModel):
             logger.error(f"Error making predictions: {str(e)}")
             raise
     
-    def _validate_data(self, data: pd.DataFrame) -> bool:
+    def _validate_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        Validate input data format
+        Validate input data format and correct if needed
         
         Args:
             data: Input DataFrame
             
         Returns:
-            True if data is valid
+            Processed and validated DataFrame or None if invalid
         """
-        required_columns = {'timestamp'}.union(set(self.metrics))
-        
+        # 检查数据格式
         if not isinstance(data, pd.DataFrame):
             logger.error("Input must be a pandas DataFrame")
-            return False
-            
-        if not all(col in data.columns for col in required_columns):
-            logger.error(f"Missing required columns. Required: {required_columns}")
-            return False
+            return None
             
         if data.empty:
             logger.error("Input DataFrame is empty")
-            return False
-            
+            return None
+        
+        # 从原始数据提取所需指标
+        processed_df = self._extract_metrics_from_raw_data(data)
+        
+        # 验证处理后的数据是否包含所需的列
+        required_columns = {'timestamp'}.union(set(self.metrics))
+        if not all(col in processed_df.columns for col in required_columns):
+            logger.error(f"Missing required columns. Required: {required_columns}")
+            return None
+        
         # 验证时间戳
         try:
-            pd.to_datetime(data['timestamp'])
+            pd.to_datetime(processed_df['timestamp'])
         except:
             logger.error("Column timestamp must be datetime")
-            return False
+            return None
                 
         # 验证指标数据类型和范围
         for metric in self.metrics:
-            if not pd.api.types.is_numeric_dtype(data[metric]):
+            if not pd.api.types.is_numeric_dtype(processed_df[metric]):
                 logger.error(f"Column {metric} must be numeric")
-                return False
+                return None
                 
             value_range = self.data_validation['value_range'].get(metric)
-            if value_range and not data[metric].between(value_range[0], value_range[1]).all():
-                logger.error(f"{metric} values out of valid range: {value_range}")
-                return False
+            if value_range:
+                # 检查是否有超出范围的值
+                out_of_range = processed_df[(processed_df[metric] < value_range[0]) | (processed_df[metric] > value_range[1])]
+                if not out_of_range.empty:
+                    logger.warning(f"Found {len(out_of_range)} values out of range for metric {metric}. Clipping to range {value_range}")
+                    # 修剪超出范围的值
+                    processed_df[metric] = processed_df[metric].clip(value_range[0], value_range[1])
                 
-        return True
+        return processed_df
+    
+    def _extract_metrics_from_raw_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        从原始数据中提取每个指标，并转换为适合模型的格式
+        
+        Args:
+            data: 原始数据，包含metric_name, value, timestamp, model_id列
+            
+        Returns:
+            DataFrame，每个指标作为一列，包含timestamp和所有指标值
+        """
+        if 'metric_name' not in data.columns or 'value' not in data.columns or 'timestamp' not in data.columns:
+            logger.error("Raw data must contain metric_name, value, and timestamp columns")
+            return pd.DataFrame()
+        
+        # 确保timestamp是datetime类型
+        data['timestamp'] = pd.to_datetime(data['timestamp'])
+        
+        # 创建结果DataFrame
+        result_df = pd.DataFrame()
+        
+        # 按模型ID分组处理（如果存在)
+        if 'model_id' in data.columns:
+            # 为简化起见，我们只使用第一个模型ID的数据
+            first_model_id = data['model_id'].iloc[0]
+            data = data[data['model_id'] == first_model_id]
+        
+        # 获取所有不同的时间戳
+        unique_timestamps = data['timestamp'].unique()
+        result_df['timestamp'] = unique_timestamps
+        
+        # 对于每个指标，提取数据并添加到结果DataFrame中
+        for metric in self.metrics:
+            metric_data = data[data['metric_name'] == metric]
+            if not metric_data.empty:
+                # 为每个时间戳取一个值（可能需要更复杂的聚合）
+                metric_df = metric_data.groupby('timestamp')['value'].mean().reset_index()
+                metric_df.columns = ['timestamp', metric]
+                
+                # 合并到结果DataFrame
+                result_df = pd.merge(result_df, metric_df, on='timestamp', how='left')
+        
+        # 确保所有指标列都存在，如果不存在则创建并填充0
+        for metric in self.metrics:
+            if metric not in result_df.columns:
+                result_df[metric] = 0.0
+        
+        # 按时间戳排序
+        result_df = result_df.sort_values('timestamp')
+        
+        # 处理缺失值
+        for metric in self.metrics:
+            result_df[metric] = result_df[metric].interpolate(method='linear')
+        
+        return result_df
     
     def _prepare_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """
@@ -226,7 +294,11 @@ class ProphetModel(BaseModel):
         Returns:
             Prepared DataFrame
         """
-        df = data.copy()
+        # 从原始数据提取指标
+        if 'metric_name' in data.columns and 'value' in data.columns:
+            df = self._extract_metrics_from_raw_data(data)
+        else:
+            df = data.copy()
         
         # 确保时间戳是datetime类型
         df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -242,18 +314,16 @@ class ProphetModel(BaseModel):
         
         # 处理缺失值
         for metric in self.metrics:
-            df[metric] = df[metric].interpolate(method='linear')
-            
-            # 确保插值后的数据在有效范围内
-            value_range = self.data_validation['value_range'].get(metric)
-            if value_range:
-                df[metric] = df[metric].clip(value_range[0], value_range[1])
+            if metric in df.columns:
+                df[metric] = df[metric].interpolate(method='linear')
+                
+                # 确保插值后的数据在有效范围内
+                value_range = self.data_validation['value_range'].get(metric)
+                if value_range:
+                    df[metric] = df[metric].clip(value_range[0], value_range[1])
         
-        # 重置索引，保持timestamp作为列
+        # 重置索引，恢复timestamp列
         df = df.reset_index()
-        
-        # 统一时间戳格式
-        df['timestamp'] = df['timestamp'].dt.strftime(self.data_validation['timestamp_format'])
         
         return df
     

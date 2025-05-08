@@ -1,30 +1,40 @@
 """Configuration settings for the Predictive Analytics Module"""
+import os
+
+# 获取环境变量或使用默认值
+PROMETHEUS_URL = os.environ.get('PROMETHEUS_URL', 'http://localhost:9090')
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092').split(',')
+REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
+REDIS_PORT = int(os.environ.get('REDIS_PORT', '6379'))
+REDIS_DB = int(os.environ.get('REDIS_DB', '0'))
+
+# 调整日志级别
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 
 # Data Collection Settings
 PROMETHEUS_CONFIG = {
-    'host': 'localhost',
-    'port': 9090,
+    'url': f"{PROMETHEUS_URL}/api/v1/query_range",
     'metrics': {
-        'cpu_usage': 'container_cpu_usage_seconds_total',
-        'memory_usage': 'container_memory_usage_bytes',
-        'network_io': 'container_network_transmit_bytes_total',
-        'latency': 'request_duration_seconds'
+        'requests_total': 'model_inference_requests_total',
+        'latency_avg': 'rate(model_inference_latency_seconds_sum[5m]) / rate(model_inference_latency_seconds_count[5m])',
+        'latency_p95': 'histogram_quantile(0.95, sum(rate(model_inference_latency_seconds_bucket[5m])) by (le, model_id))',
+        'latency_p99': 'histogram_quantile(0.99, sum(rate(model_inference_latency_seconds_bucket[5m])) by (le, model_id))'
     },
     'query_timeout': 30,
     'retry_attempts': 3,
     'data_validation': {
         'timestamp_format': '%Y-%m-%d %H:%M:%S',
         'value_range': {
-            'cpu_usage': (0, 100),
-            'memory_usage': (0, 32 * 1024 * 1024 * 1024),
-            'network_io': (0, 10 * 1024 * 1024 * 1024),
-            'latency': (0, 10)
+            'requests_total': (0, 1000000),
+            'latency_avg': (0, 100),
+            'latency_p95': (0, 100),
+            'latency_p99': (0, 100)
         }
     }
 }
 
 KAFKA_CONFIG = {
-    'bootstrap_servers': ['kafka:9092'],
+    'bootstrap_servers': KAFKA_BOOTSTRAP_SERVERS,
     'topics': {
         'metrics': {
             'name': 'metrics',
@@ -51,7 +61,7 @@ KAFKA_CONFIG = {
             'cpu_usage': (0, 100),
             'memory_usage': (0, 32 * 1024 * 1024 * 1024),
             'network_io': (0, 10 * 1024 * 1024 * 1024),
-            'latency': (0, 10)
+            'latency': (0, 100)
         }
     }
 }
@@ -74,14 +84,14 @@ PROPHET_CONFIG = {
         'cross_validation_windows': 3,
         'metrics': ['rmse', 'mae', 'mape']
     },
-    'features': ['timestamp', 'cpu_usage', 'memory_usage', 'network_io', 'latency'],
+    'features': ['timestamp', 'requests_total', 'latency_avg', 'latency_p95', 'latency_p99'],
     'data_validation': {
         'timestamp_format': '%Y-%m-%d %H:%M:%S',
         'value_range': {
-            'cpu_usage': (0, 100),
-            'memory_usage': (0, 32 * 1024 * 1024 * 1024),
-            'network_io': (0, 10 * 1024 * 1024 * 1024),
-            'latency': (0, 1.0)
+            'requests_total': (0, 1000000),
+            'latency_avg': (0, 100),
+            'latency_p95': (0, 10),
+            'latency_p99': (0, 10)
         }
     }
 }
@@ -99,14 +109,14 @@ SKLEARN_CONFIG = {
         'cv_folds': 5,
         'scoring': 'neg_mean_squared_error'
     },
-    'features': ['hour', 'day_of_week', 'month', 'cpu_usage', 'memory_usage', 'network_io'],
+    'features': ['hour', 'day_of_week', 'month', 'requests_total', 'latency_avg', 'latency_p95', 'latency_p99'],
     'data_validation': {
         'timestamp_format': '%Y-%m-%d %H:%M:%S',
         'value_range': {
-            'cpu_usage': (0, 100),
-            'memory_usage': (0, 32 * 1024 * 1024 * 1024),
-            'network_io': (0, 10 * 1024 * 1024 * 1024),
-            'latency': (0, 1.0)
+            'requests_total': (0, 1000000),
+            'latency_avg': (0, 100),
+            'latency_p95': (0, 100),
+            'latency_p99': (0, 100)
         }
     }
 }
@@ -115,10 +125,10 @@ SKLEARN_CONFIG = {
 OPTIMIZATION_CONFIG = {
     'objective': 'minimize_cost',
     'constraints': {
-        'max_cpu': 100,  # percentage
-        'max_memory': 32 * 1024 * 1024 * 1024,  # bytes (32GB)
-        'max_network': 10 * 1024 * 1024 * 1024,  # bytes (10GB/s)
-        'max_latency': 1.0  # seconds
+        'max_cpu': float(os.environ.get('MAX_CPU', '100')),  # percentage
+        'max_memory': float(os.environ.get('MAX_MEMORY', str(32 * 1024 * 1024 * 1024))),  # bytes (32GB)
+        'max_network': float(os.environ.get('MAX_NETWORK', str(10 * 1024 * 1024 * 1024))),  # bytes (10GB/s)
+        'max_latency': float(os.environ.get('MAX_LATENCY', '1.0'))  # seconds
     },
     'weights': {
         'cpu': 0.4,
@@ -126,13 +136,13 @@ OPTIMIZATION_CONFIG = {
         'network': 0.3
     },
     'solver_config': {
-        'solver': 'CBC',
-        'safety_margin': 1.2,
-        'balance_resources': True,
-        'balance_tolerance': 0.2,
-        'min_utilization': 20,
-        'max_utilization': 90,
-        'solution_timeout': 300,
+        'solver': os.environ.get('OPTIMIZER_SOLVER', 'CBC'),
+        'safety_margin': float(os.environ.get('SAFETY_MARGIN', '1.2')),
+        'balance_resources': os.environ.get('BALANCE_RESOURCES', 'true').lower() == 'true',
+        'balance_tolerance': float(os.environ.get('BALANCE_TOLERANCE', '0.2')),
+        'min_utilization': float(os.environ.get('MIN_UTILIZATION', '20')),
+        'max_utilization': float(os.environ.get('MAX_UTILIZATION', '90')),
+        'solution_timeout': int(os.environ.get('SOLUTION_TIMEOUT', '300')),
         'options': {
             'msg': 0,
             'timeLimit': 60
@@ -142,25 +152,25 @@ OPTIMIZATION_CONFIG = {
 
 # Cache Settings
 CACHE_CONFIG = {
-    'host': 'localhost',
-    'port': 6379,
-    'db': 0,
-    'key_prefix': 'prediction:',
-    'expire': 300  # seconds
+    'host': REDIS_HOST,
+    'port': REDIS_PORT,
+    'db': REDIS_DB,
+    'key_prefix': os.environ.get('REDIS_KEY_PREFIX', 'prediction:'),
+    'expire': int(os.environ.get('REDIS_EXPIRE', '300'))  # seconds
 }
 
 # Logging Settings
 LOGGING_CONFIG = {
-    'level': 'INFO',
+    'level': LOG_LEVEL,
     'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'level': 'INFO'
+            'level': LOG_LEVEL
         },
         'file': {
             'class': 'logging.FileHandler',
-            'filename': 'predictive_analytics.log',
+            'filename': os.environ.get('LOG_FILE', 'predictive_analytics.log'),
             'level': 'DEBUG'
         }
     }

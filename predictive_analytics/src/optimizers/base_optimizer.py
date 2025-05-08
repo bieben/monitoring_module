@@ -96,22 +96,33 @@ class BaseOptimizer(ABC):
         Returns:
             True if predictions are valid
         """
-        required_columns = {'timestamp', 'cpu_usage', 'memory_usage', 'network_io', 'latency'}
+        # 检查传统指标集或新指标集
+        traditional_columns = {'timestamp', 'cpu_usage', 'memory_usage', 'network_io', 'latency'}
+        new_columns = {'timestamp', 'requests_total', 'latency_avg', 'latency_p95', 'latency_p99'}
         
         if not isinstance(predictions, pd.DataFrame):
             logger.error("Predictions must be a pandas DataFrame")
             return False
-            
-        if not all(col in predictions.columns for col in required_columns):
-            logger.error(f"Missing required columns. Required: {required_columns}")
-            return False
-            
+           
         if predictions.empty:
             logger.error("Predictions DataFrame is empty")
             return False
+        
+        # 检查是否包含所有传统列或所有新列
+        has_traditional = all(col in predictions.columns for col in traditional_columns)
+        has_new = all(col in predictions.columns for col in new_columns)
+        
+        if not has_traditional and not has_new:
+            logger.error(f"Missing required columns. Required either {traditional_columns} or {new_columns}")
+            return False
             
         # 验证数据类型
-        numeric_columns = {'cpu_usage', 'memory_usage', 'network_io', 'latency'}
+        numeric_columns = []
+        if has_traditional:
+            numeric_columns = ['cpu_usage', 'memory_usage', 'network_io', 'latency']
+        elif has_new:
+            numeric_columns = ['requests_total', 'latency_avg', 'latency_p95', 'latency_p99']
+            
         for col in numeric_columns:
             if not pd.api.types.is_numeric_dtype(predictions[col]):
                 logger.error(f"Column {col} must be numeric")
