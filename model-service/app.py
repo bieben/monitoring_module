@@ -9,6 +9,8 @@ import time
 from service import MLService
 from flask_cors import CORS
 from model_registry import run_registry_service
+from model_metrics import start_metrics_collection, stop_metrics_collection
+import psutil
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -276,31 +278,190 @@ def health():
             logger.error(f"Health check failed: {str(e)}", exc_info=True)
             return jsonify({"error": f"Health check failed: {str(e)}"}), 500
 
-def run_registry():
+@app.route("/models/resources")
+def models_resources():
+    """获取所有已部署模型的资源使用情况"""
+    # 记录请求指标
+    REQUEST_COUNT.labels(endpoint="/models/resources", model_id="global").inc()
+    
+    # 执行资源查询并计时
+    with RESPONSE_TIME.labels(endpoint="/models/resources", model_id="global").time():
+        try:
+            # 获取模型状态信息
+            status_result, _ = ml_service.get_models_status()
+            models_info = status_result.get('models', {})
+            
+            # 准备资源使用情况响应
+            resources_data = {}
+            
+            # 遍历所有模型
+            for model_id, model_info in models_info.items():
+                # 只收集已部署的模型资源
+                if model_info.get('deployment', {}).get('deployed', False):
+                    # 获取进程信息
+                    pid = None
+                    process_info = ml_service.model_processes.get(model_id, {})
+                    process = process_info.get('process')
+                    port = process_info.get('port')
+                    
+                    # 检查进程是否在运行
+                    is_process_running = False
+                    if process:
+                        try:
+                            # 如果是Popen对象或其他类型，尝试获取PID
+                            if hasattr(process, 'pid'):
+                                pid = process.pid
+                                
+                                # 尝试验证PID是否有效
+                                try:
+                                    # 创建新的psutil.Process对象从pid
+                                    psutil_process = psutil.Process(pid)
+                                    # 确认进程存在
+                                    psutil_process.status()
+                                    is_process_running = True
+                                    # 使用新的psutil对象替换原始process
+                                    process = psutil_process
+                                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                                    is_process_running = False
+                        except (AttributeError, TypeError):
+                            is_process_running = False
+                    
+                    if is_process_running:
+                        try:
+                            # 收集CPU使用率
+                            cpu_percent = process.cpu_percent(interval=0.1)
+                            
+                            # 收集内存使用情况
+                            memory_info = process.memory_info()
+                            memory_usage_bytes = memory_info.rss
+                            memory_percent = process.memory_percent()
+                            
+                            # 收集网络IO (如果可用)
+                            net_io = None
+                            net_io_rate = 0.0
+                            
+                            try:
+                                io_counters = process.io_counters()
+                                net_io = {
+                                    'read_bytes': io_counters.read_bytes,
+                                    'write_bytes': io_counters.write_bytes
+                                }
+                            except:
+                                # 某些系统可能不支持io_counters
+                                pass
+                            
+                            # 将资源信息添加到响应
+                            resources_data[model_id] = {
+                                'cpu_usage_percent': cpu_percent,
+                                'memory_usage_bytes': memory_usage_bytes,
+                                'memory_usage_percent': memory_percent,
+                                'network_io': net_io,
+                                'network_io_rate': net_io_rate,
+                                'pid': pid,
+                                'port': port,
+                                'uptime': time.time() - process.create_time()
+                            }
+                        except Exception as e:
+                            # 如果无法获取详细资源信息，只报告基本信息
+                            resources_data[model_id] = {
+                                'pid': pid,
+                                'error': str(e),
+                                'port': port
+                            }
+                    else:
+                        # 模型已部署但进程可能已停止
+                        resources_data[model_id] = {
+                            'status': 'not_running',
+                            'port': port
+                        }
+            
+            # 添加系统总体资源使用情况
+            resources_data['system'] = {
+                'cpu_usage_percent': psutil.cpu_percent(),
+                'memory_usage_percent': psutil.virtual_memory().percent,
+                'memory_available_bytes': psutil.virtual_memory().available
+            }
+            
+            return jsonify({
+                'status': 'success',
+                'data': resources_data,
+                'timestamp': time.time()
+            }), 200
+            
+        except Exception as e:
+            # 增加错误计数
+            model_errors_counter.labels(model_id="global", error_type="resources").inc()
+            # 记录详细错误日志
+            logger.error(f"Failed to get models resources: {str(e)}", exc_info=True)
+            return jsonify({
+                'status': 'error',
+                'message': f"Failed to get models resources: {str(e)}"
+            }), 500
+
+@app.route("/debug/processes")
+def debug_processes():
+    """临时调试端点：查看模型进程信息"""
+    try:
+        result = {}
+        for model_id, process_info in ml_service.model_processes.items():
+            process = process_info.get('process')
+            result[model_id] = {
+                'pid': process.pid if hasattr(process, 'pid') else None,
+                'status': process_info.get('status'),
+                'port': process_info.get('port'),
+                'has_pid': hasattr(process, 'pid') if process else False,
+                'process_type': str(type(process)) if process else 'None'
+            }
+        
+        # 添加一些系统信息
+        result['system_info'] = {
+            'python_version': sys.version,
+            'psutil_version': psutil.__version__
+        }
+        
+        return jsonify({
+            'status': 'success',
+            'data': result
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f"Error in debug endpoint: {str(e)}"
+        }), 500
+
+def run_registry(port):
     """在独立线程中运行注册中心服务"""
-    registry_port = int(os.environ.get('REGISTRY_PORT', '5050'))
-    run_registry_service(port=registry_port)
+    run_registry_service(port=port)
 
 def main():
-    parser = argparse.ArgumentParser(description='启动模型服务')
-    parser.add_argument('--port', type=int, default=5000, help='主服务端口')
-    parser.add_argument('--registry-port', type=int, default=5050, help='注册中心端口')
-    parser.add_argument('--no-registry', action='store_true', help='不启动内置的注册中心')
-    
+    """应用程序入口"""
+    parser = argparse.ArgumentParser(description='Model Service')
+    parser.add_argument('--port', type=int, default=5000, help='Port to listen on')
+    parser.add_argument('--registry_port', type=int, default=5050, help='Registry service port')
     args = parser.parse_args()
     
-    # 设置环境变量
-    os.environ['REGISTRY_PORT'] = str(args.registry_port)
+    global registry_thread
     
-    # 启动注册中心服务（在独立线程中）
-    if not args.no_registry:
-        logger.info(f"Starting model registry service on port {args.registry_port}")
-        registry_thread = threading.Thread(target=run_registry, daemon=True)
+    try:
+        # 启动注册服务
+        registry_thread = threading.Thread(target=run_registry, args=(args.registry_port,))
+        registry_thread.daemon = True
         registry_thread.start()
-    
-    # 启动主服务
-    logger.info(f"Starting model service on port {args.port}")
-    app.run(host="0.0.0.0", port=args.port, debug=False)
+        logger.info(f"Registry service starting on port {args.registry_port}")
+        
+        # 启动模型资源监控
+        start_metrics_collection()
+        logger.info("Model metrics collector started")
+        
+        # 启动主应用
+        app.run(host='0.0.0.0', port=args.port, debug=False, threaded=True)
+    except KeyboardInterrupt:
+        logger.info("Stopping services...")
+        stop_metrics_collection()
+    except Exception as e:
+        logger.error(f"Error starting service: {str(e)}")
+        stop_metrics_collection()
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

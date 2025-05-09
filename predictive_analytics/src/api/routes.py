@@ -120,6 +120,10 @@ def predict():
         metrics_df = collector.collect_metrics(metrics_start_time, end_time)
         logger.info(f"Metrics collection completed in {time.time() - start_time:.2f} seconds")
         
+        # 检查是否存在实时系统资源指标数据
+        real_metrics = [metric for metric in metrics_df['metric_name'].unique() 
+                       if metric in ['cpu_usage_real', 'memory_usage_real', 'network_io_real']]
+        
         # Make predictions
         prediction_start = time.time()
         if use_cache and model.load_model():
@@ -131,6 +135,20 @@ def predict():
         
         predictions_df = model.predict(horizon)
         logger.info(f"Prediction completed in {time.time() - prediction_start:.2f} seconds")
+        
+        # 如果存在实时系统指标，直接创建带有最新值的预测列
+        if real_metrics:
+            logger.info(f"Adding real system metrics to predictions: {real_metrics}")
+            # 获取最新的系统指标值
+            latest_metrics = {}
+            for metric in real_metrics:
+                metric_data = metrics_df[metrics_df['metric_name'] == metric]
+                if not metric_data.empty:
+                    latest_value = float(metric_data['value'].iloc[-1])
+                    # 将真实系统指标添加到预测数据中
+                    predictions_df[metric] = latest_value
+                    latest_metrics[metric] = latest_value
+                    logger.info(f"Added {metric} = {latest_value} to predictions")
         
         # Optimize resources
         optimization_start = time.time()
@@ -205,7 +223,9 @@ def get_latest_prediction():
                 if not metrics_df.empty:
                     # 提取最新的指标值
                     latest_metrics = {}
-                    for metric_name in ['requests_total', 'latency_avg', 'latency_p95', 'latency_p99']:
+                    # 包含真实资源指标
+                    for metric_name in ['requests_total', 'latency_avg', 'latency_p95', 'latency_p99', 
+                                        'cpu_usage_real', 'memory_usage_real', 'network_io_real']:
                         metric_data = metrics_df[metrics_df['metric_name'] == metric_name]
                         if not metric_data.empty:
                             latest_metrics[metric_name] = float(metric_data['value'].iloc[-1])
@@ -217,13 +237,22 @@ def get_latest_prediction():
                     current_time = datetime.now()
                     for i in range(5):  # 只创建5个预测点
                         future_time = current_time + timedelta(minutes=5 * i)
-                        dummy_predictions.append({
+                        prediction = {
                             'timestamp': future_time.strftime('%Y-%m-%d %H:%M:%S'),
                             'requests_total': latest_metrics.get('requests_total', 0.0),
                             'latency_avg': latest_metrics.get('latency_avg', 0.0),
                             'latency_p95': latest_metrics.get('latency_p95', 0.0),
                             'latency_p99': latest_metrics.get('latency_p99', 0.0)
-                        })
+                        }
+                        # 添加真实资源使用数据（如果有）
+                        if 'cpu_usage_real' in latest_metrics:
+                            prediction['cpu_usage'] = latest_metrics.get('cpu_usage_real', 0.0)
+                        if 'memory_usage_real' in latest_metrics:
+                            prediction['memory_usage'] = latest_metrics.get('memory_usage_real', 0.0)
+                        if 'network_io_real' in latest_metrics:
+                            prediction['network_io'] = latest_metrics.get('network_io_real', 0.0)
+                            
+                        dummy_predictions.append(prediction)
                     
                     # 创建一个基本优化结果
                     dummy_optimization = {
@@ -234,9 +263,10 @@ def get_latest_prediction():
                         'solver_status': 'Optimal',
                         'objective_value': 0.0,
                         'utilization': {
-                            'cpu': min(max(latest_metrics.get('requests_total', 0.0), 1.0), 100.0),
-                            'memory': min(max(latest_metrics.get('latency_avg', 0.0) * 100, 1.0), 100.0),
-                            'network': min(max(latest_metrics.get('latency_p95', 0.0) * 100, 1.0), 100.0)
+                            # 优先使用真实资源指标来计算利用率
+                            'cpu': latest_metrics.get('cpu_usage_real', min(max(latest_metrics.get('requests_total', 0.0), 1.0), 100.0)),
+                            'memory': latest_metrics.get('memory_usage_real', min(max(latest_metrics.get('latency_avg', 0.0) * 100, 1.0), 100.0)),
+                            'network': latest_metrics.get('network_io_real', min(max(latest_metrics.get('latency_p95', 0.0) * 100, 1.0), 100.0)) / (10 * 1024 * 1024) if 'network_io_real' in latest_metrics else min(max(latest_metrics.get('latency_p95', 0.0) * 100, 1.0), 100.0)
                         }
                     }
                     
@@ -337,7 +367,8 @@ def get_prediction_history():
                         
                         # 根据指标创建基本预测
                         latest_metrics = {}
-                        for metric_name in ['requests_total', 'latency_avg', 'latency_p95', 'latency_p99']:
+                        for metric_name in ['requests_total', 'latency_avg', 'latency_p95', 'latency_p99',
+                                           'cpu_usage_real', 'memory_usage_real', 'network_io_real']:
                             metric_data = metrics_df[metrics_df['metric_name'] == metric_name]
                             if not metric_data.empty:
                                 latest_metrics[metric_name] = float(metric_data['value'].iloc[-1])
@@ -348,13 +379,22 @@ def get_prediction_history():
                         dummy_predictions = []
                         for j in range(3):  # 只创建3个预测点
                             future_time = past_time + timedelta(minutes=5 * j)
-                            dummy_predictions.append({
+                            prediction = {
                                 'timestamp': future_time.strftime('%Y-%m-%d %H:%M:%S'),
                                 'requests_total': latest_metrics.get('requests_total', 0.0),
                                 'latency_avg': latest_metrics.get('latency_avg', 0.0),
                                 'latency_p95': latest_metrics.get('latency_p95', 0.0),
                                 'latency_p99': latest_metrics.get('latency_p99', 0.0)
-                            })
+                            }
+                            # 添加真实资源使用数据（如果有）
+                            if 'cpu_usage_real' in latest_metrics:
+                                prediction['cpu_usage'] = latest_metrics.get('cpu_usage_real', 0.0)
+                            if 'memory_usage_real' in latest_metrics:
+                                prediction['memory_usage'] = latest_metrics.get('memory_usage_real', 0.0)
+                            if 'network_io_real' in latest_metrics:
+                                prediction['network_io'] = latest_metrics.get('network_io_real', 0.0)
+                                
+                            dummy_predictions.append(prediction)
                         
                         # 创建一个基本优化结果
                         dummy_optimization = {
@@ -365,9 +405,10 @@ def get_prediction_history():
                             'solver_status': 'Optimal',
                             'objective_value': 0.0,
                             'utilization': {
-                                'cpu': min(max(latest_metrics.get('requests_total', 0.0), 1.0), 100.0),
-                                'memory': min(max(latest_metrics.get('latency_avg', 0.0) * 100, 1.0), 100.0),
-                                'network': min(max(latest_metrics.get('latency_p95', 0.0) * 100, 1.0), 100.0)
+                                # 优先使用真实资源指标来计算利用率
+                                'cpu': latest_metrics.get('cpu_usage_real', min(max(latest_metrics.get('requests_total', 0.0), 1.0), 100.0)),
+                                'memory': latest_metrics.get('memory_usage_real', min(max(latest_metrics.get('latency_avg', 0.0) * 100, 1.0), 100.0)),
+                                'network': latest_metrics.get('network_io_real', min(max(latest_metrics.get('latency_p95', 0.0) * 100, 1.0), 100.0)) / (10 * 1024 * 1024) if 'network_io_real' in latest_metrics else min(max(latest_metrics.get('latency_p95', 0.0) * 100, 1.0), 100.0)
                             }
                         }
                         

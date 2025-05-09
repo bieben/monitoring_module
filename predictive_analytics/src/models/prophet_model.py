@@ -66,116 +66,131 @@ class ProphetModel(BaseModel):
             
         return True
     
-    def train(self, data: pd.DataFrame) -> None:
+    def train(self, data: pd.DataFrame):
         """
-        Train Prophet models for each metric
+        Train Prophet models on the data
         
         Args:
-            data: Training data DataFrame
+            data: DataFrame containing metrics
         """
-        processed_data = self._validate_data(data)
-        if processed_data is None:
-            raise ValueError("Invalid input data")
-            
-        data = self._prepare_data(processed_data)
+        logger.info(f"Training Prophet models on data with shape {data.shape}")
         
-        try:
-            for metric in self.metrics:
-                # 准备Prophet数据
-                df = pd.DataFrame({
-                    'ds': pd.to_datetime(data['timestamp']),
-                    'y': data[metric]
-                })
+        # 获取数据中的唯一指标名称
+        metrics = data['metric_name'].unique()
+        logger.info(f"Metrics in training data: {metrics}")
+        
+        # 检查是否有真实资源指标
+        real_metrics = [m for m in metrics if m in ['cpu_usage_real', 'memory_usage_real', 'network_io_real']]
+        if real_metrics:
+            logger.info(f"Found real system metrics in training data: {real_metrics}")
+            
+        # 对每个指标训练一个单独的模型
+        for metric in metrics:
+            # 过滤出当前指标的数据
+            metric_data = data[data['metric_name'] == metric].copy()
+            
+            if metric_data.empty:
+                logger.warning(f"No data for metric {metric}, skipping")
+                continue
                 
-                # 验证数据范围
-                value_range = self.data_validation['value_range'].get(metric)
-                if value_range:
-                    # 检查是否有超出范围的值
-                    out_of_range = df[(df['y'] < value_range[0]) | (df['y'] > value_range[1])]
-                    if not out_of_range.empty:
-                        logger.warning(f"Found {len(out_of_range)} values out of range for metric {metric}. Clipping to range {value_range}")
-                        # 修剪超出范围的值
-                        df['y'] = df['y'].clip(value_range[0], value_range[1])
+            # 确保数据按时间排序
+            metric_data = metric_data.sort_values('timestamp')
+            
+            # 准备Prophet所需的数据格式
+            prophet_data = pd.DataFrame({
+                'ds': metric_data['timestamp'],
+                'y': metric_data['value']
+            })
+            
+            # 检查是否有足够的数据点
+            if len(prophet_data) < self.config.get('min_train_samples', 8):
+                logger.warning(f"Not enough data for metric {metric}: {len(prophet_data)} samples")
+                continue
                 
-                # 初始化并训练模型
+            try:
+                # 创建并训练Prophet模型
                 model = Prophet(
-                    **self.model_params
+                    growth=self.config.get('growth', 'linear'),
+                    daily_seasonality=self.config.get('daily_seasonality', True),
+                    weekly_seasonality=self.config.get('weekly_seasonality', True),
+                    yearly_seasonality=self.config.get('yearly_seasonality', False),
+                    interval_width=self.config.get('interval_width', 0.95)
                 )
                 
-                # 训练模型
-                model.fit(df)
+                model.fit(prophet_data)
                 
-                # 保存模型
+                # 存储训练好的模型
                 self.models[metric] = model
+                logger.info(f"Successfully trained model for metric {metric}")
                 
-            self.is_trained = True
-            logger.info("Prophet models trained successfully")
-            
-        except Exception as e:
-            logger.error(f"Error training Prophet models: {str(e)}")
-            raise
+            except Exception as e:
+                logger.error(f"Error training model for metric {metric}: {str(e)}")
     
-    def predict(self, horizon: int) -> pd.DataFrame:
+    def predict(self, horizon: int = 30) -> pd.DataFrame:
         """
-        Make predictions using trained Prophet models
+        Make predictions for the specified horizon
         
         Args:
-            horizon: Number of future time points to predict
+            horizon: Number of minutes to forecast
             
         Returns:
-            DataFrame containing predictions
-            
-        Raises:
-            ValueError: If models are not trained or horizon is invalid
+            DataFrame with predictions
         """
-        if not self.is_trained:
-            raise ValueError("Models must be trained before prediction")
+        if not self.models:
+            raise ValueError("No trained models available. Please train the models first.")
             
-        if horizon <= 0:
-            raise ValueError("Horizon must be positive")
+        # Convert horizon to periods (assuming 5-minute intervals)
+        periods = int(horizon / 5)
+        if periods < 1:
+            periods = 1
             
-        try:
-            # 创建未来日期范围
-            future_dates = pd.date_range(
-                start=datetime.now(),
-                periods=horizon,
-                freq='5min'
-            )
-            
-            predictions = pd.DataFrame({'timestamp': future_dates})
-            
-            # 对每个指标进行预测
-            for metric in self.metrics:
-                future = pd.DataFrame({'ds': future_dates})
-                forecast = self.models[metric].predict(future)
+        logger.info(f"Making predictions for {horizon} minutes ({periods} periods)")
+        
+        all_predictions = []
+        
+        for metric_name, model in self.models.items():
+            try:
+                # 创建未来时间点
+                future = model.make_future_dataframe(periods=periods, freq='5min')
                 
-                # 确保预测值在有效范围内
-                value_range = self.data_validation['value_range'].get(metric)
-                if value_range:
-                    forecast['yhat'] = forecast['yhat'].clip(value_range[0], value_range[1])
-                    if 'yhat_lower' in forecast.columns:
-                        forecast['yhat_lower'] = forecast['yhat_lower'].clip(value_range[0], value_range[1])
-                    if 'yhat_upper' in forecast.columns:
-                        forecast['yhat_upper'] = forecast['yhat_upper'].clip(value_range[0], value_range[1])
+                # 进行预测
+                forecast = model.predict(future)
                 
-                # 重命名预测列
-                predictions[metric] = forecast['yhat']
+                # 获取预测的最后一个periods部分
+                forecast = forecast.iloc[-periods:].copy()
                 
-                # 添加预测区间
-                if self.model_params.get('return_intervals', True):
-                    predictions[f"{metric}_lower"] = forecast['yhat_lower']
-                    predictions[f"{metric}_upper"] = forecast['yhat_upper']
+                # 将预测添加到结果中
+                result = pd.DataFrame({
+                    'timestamp': forecast['ds'],
+                    f'{metric_name}': forecast['yhat'],
+                    f'{metric_name}_lower': forecast['yhat_lower'],
+                    f'{metric_name}_upper': forecast['yhat_upper']
+                })
+                
+                all_predictions.append(result)
+                
+            except Exception as e:
+                logger.error(f"Error making predictions for metric {metric_name}: {str(e)}")
+                
+        if not all_predictions:
+            raise ValueError("Failed to make predictions for any metric")
             
-            # 统一时间戳格式
-            predictions['timestamp'] = predictions['timestamp'].dt.strftime(
-                self.data_validation['timestamp_format']
-            )
+        # 合并所有预测
+        predictions = all_predictions[0]
+        for pred in all_predictions[1:]:
+            predictions = predictions.merge(pred, on='timestamp', how='outer')
             
-            return predictions
+        # 确保没有缺失值
+        predictions = predictions.fillna(0)
+        
+        # 特殊处理：确保真实资源指标包含在最终结果中
+        for metric in self.models.keys():
+            if metric in ['cpu_usage_real', 'memory_usage_real', 'network_io_real']:
+                logger.info(f"Including real system metric {metric} in predictions")
+        
+        logger.info(f"Final predictions columns: {predictions.columns.tolist()}")
             
-        except Exception as e:
-            logger.error(f"Error making predictions: {str(e)}")
-            raise
+        return predictions
     
     def _validate_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """

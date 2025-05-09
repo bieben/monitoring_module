@@ -17,4 +17,71 @@ groups:
       severity: critical
     annotations:
       summary: "Spike in prediction errors"
-      description: "More than 3 errors in last 5 minutes" 
+      description: "More than 3 errors in last 5 minutes"
+
+- name: model-resource-alerts
+  rules:
+  - alert: ModelHighCPUUsage
+    expr: instance_model_cpu_usage_percent > 75
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High model CPU usage"
+      description: "Model {{ $labels.model_id }} ({{ $labels.instance }}) CPU usage is above 75% for 5 minutes"
+
+  - alert: ModelHighMemoryUsage
+    expr: instance_model_memory_usage_bytes / 1000000000 > 1.5
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High model memory usage"
+      description: "Model {{ $labels.model_id }} ({{ $labels.instance }}) memory usage is above 1.5GB for 5 minutes"
+
+  - alert: ModelHighNetworkTraffic
+    expr: instance_model_network_io_bytes_per_second > 50000000
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High model network traffic"
+      description: "Model {{ $labels.model_id }} ({{ $labels.instance }}) network traffic is above 50MB/s for 5 minutes"
+
+- name: host-resource-alerts
+  rules:
+  - alert: HighCPUUsage
+    expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High CPU usage detected"
+      description: "CPU usage is above 80% for 5 minutes on {{ $labels.instance }}"
+
+  - alert: HighMemoryUsage
+    expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High memory usage detected"
+      description: "Memory usage is above 85% for 5 minutes on {{ $labels.instance }}"
+
+  - alert: HighDiskUsage
+    expr: (node_filesystem_size_bytes - node_filesystem_free_bytes) / node_filesystem_size_bytes * 100 > 85
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High disk usage detected"
+      description: "Disk usage is above 85% for 5 minutes on {{ $labels.instance }} mount point {{ $labels.mountpoint }}"
+
+  - alert: HighNetworkTraffic
+    expr: sum(rate(node_network_receive_bytes_total[5m]) + rate(node_network_transmit_bytes_total[5m])) by (instance) > 100000000
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High network traffic detected"
+      description: "Network traffic is above 100MB/s for 5 minutes on {{ $labels.instance }}" 

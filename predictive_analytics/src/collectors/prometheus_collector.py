@@ -34,7 +34,11 @@ class PrometheusCollector(BaseCollector):
             'requests_total': self.config['metrics']['requests_total'],
             'latency_avg': self.config['metrics']['latency_avg'],
             'latency_p95': self.config['metrics']['latency_p95'],
-            'latency_p99': self.config['metrics']['latency_p99']
+            'latency_p99': self.config['metrics']['latency_p99'],
+            # 添加真实资源指标
+            'cpu_usage_real': self.config['metrics']['cpu_usage_real'],
+            'memory_usage_real': self.config['metrics']['memory_usage_real'],
+            'network_io_real': self.config['metrics']['network_io_real']
         }
         
         # 设置URL
@@ -61,9 +65,14 @@ class PrometheusCollector(BaseCollector):
         if not all(field in self.config for field in required_fields):
             raise ValueError("Missing required configuration fields")
             
-        required_metrics = {'requests_total', 'latency_avg', 'latency_p95', 'latency_p99'}
+        required_metrics = {'requests_total', 'latency_avg', 'latency_p95', 'latency_p99', 
+                           'cpu_usage_real', 'memory_usage_real', 'network_io_real'}
         if not all(metric in self.config['metrics'] for metric in required_metrics):
-            raise ValueError("Missing required metrics in configuration")
+            logger.warning("Some real system metrics are missing in configuration. Only application metrics will be collected.")
+            # 确保至少有基本的应用指标
+            basic_metrics = {'requests_total', 'latency_avg', 'latency_p95', 'latency_p99'}
+            if not all(metric in self.config['metrics'] for metric in basic_metrics):
+                raise ValueError("Missing required basic metrics in configuration")
             
         return True
     
@@ -89,12 +98,20 @@ class PrometheusCollector(BaseCollector):
         all_metrics = []
         errors = []
         
+        # 跟踪找到的真实资源指标
+        real_metrics_found = []
+        
         for metric_name, query in self.metrics.items():
             try:
                 metric_data = self._query_prometheus_with_retry(query, start_time, end_time, step)
                 if metric_data is not None:
                     metric_df = self._process_metric_data(metric_data, metric_name)
                     all_metrics.append(metric_df)
+                    
+                    # 跟踪真实资源指标
+                    if metric_name in ['cpu_usage_real', 'memory_usage_real', 'network_io_real']:
+                        real_metrics_found.append(metric_name)
+                        logger.info(f"Successfully collected real system metric: {metric_name}")
                 else:
                     errors.append(f"Failed to collect metric {metric_name}: No data available")
             except Exception as e:
@@ -114,6 +131,9 @@ class PrometheusCollector(BaseCollector):
         # 验证数据
         if not self._validate_data(combined_df):
             raise RuntimeError("Invalid metric data format")
+        
+        logger.info(f"Collected metrics with shape {combined_df.shape}, including real system metrics: {real_metrics_found}")
+        logger.info(f"Unique metric names in collected data: {combined_df['metric_name'].unique()}")
         
         return combined_df
     
@@ -186,7 +206,13 @@ class PrometheusCollector(BaseCollector):
                 raise ValueError(f"Query failed: {result.get('error', 'Unknown error')}")
                 
             if not result['data']['result']:
-                logger.warning(f"No data returned for query: {query}")
+                # 对于真实系统指标，记录警告但不将其视为错误
+                if query in [self.config['metrics'].get('cpu_usage_real'), 
+                            self.config['metrics'].get('memory_usage_real'), 
+                            self.config['metrics'].get('network_io_real')]:
+                    logger.warning(f"No real system metric data returned for query: {query}. This may be expected if Node Exporter is not properly configured.")
+                else:
+                    logger.warning(f"No data returned for query: {query}")
                 return None
                 
             return result['data']['result']
@@ -211,17 +237,34 @@ class PrometheusCollector(BaseCollector):
         for result in metric_data:
             # 提取标签信息
             labels = result.get('metric', {})
-            model_id = labels.get('model_id', 'unknown')
+            
+            # 根据不同类型的指标提取相关标签
+            if metric_name in ['cpu_usage_real', 'memory_usage_real', 'network_io_real']:
+                # 对于Node Exporter指标，使用instance作为标识
+                model_id = 'system'  # 系统级别指标
+                instance = labels.get('instance', 'unknown')
+                # 可以在这里添加额外的标签处理逻辑
+                extra_labels = {'instance': instance}
+                
+                # 特别记录这些是真实系统指标
+                logger.info(f"Processing real system metric: {metric_name} from instance {instance}")
+            else:
+                # 对于应用指标，使用model_id作为标识
+                model_id = labels.get('model_id', 'unknown')
+                extra_labels = {}
             
             # 处理数据点
             for timestamp, value in result['values']:
                 try:
-                    processed_data.append({
+                    data_point = {
                         'timestamp': pd.to_datetime(timestamp, unit='s'),
                         'metric_name': metric_name,
                         'value': float(value),
-                        'model_id': model_id
-                    })
+                        'model_id': model_id,
+                    }
+                    # 添加额外标签
+                    data_point.update(extra_labels)
+                    processed_data.append(data_point)
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Error processing data point: {str(e)}")
                     continue
@@ -242,8 +285,12 @@ class PrometheusCollector(BaseCollector):
             df = df.reset_index(drop=True)
             
             # 如果有重复行，则按时间戳、指标名称和模型ID分组，取平均值
-            if df.duplicated(['timestamp', 'metric_name', 'model_id']).any():
-                df = df.groupby(['timestamp', 'metric_name', 'model_id']).agg({
+            group_cols = ['timestamp', 'metric_name', 'model_id']
+            if 'instance' in df.columns:
+                group_cols.append('instance')
+                
+            if df.duplicated(group_cols).any():
+                df = df.groupby(group_cols).agg({
                     'value': 'mean'
                 }).reset_index()
         

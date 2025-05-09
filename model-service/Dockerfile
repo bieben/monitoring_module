@@ -23,6 +23,9 @@ RUN mkdir -p port_mappings
 # Copy application files
 COPY . .
 
+# Make sure the resource monitoring script is executable
+RUN chmod +x show_model_resources.py
+
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV MODEL_SERVICE_PORT_START=8000
@@ -38,5 +41,5 @@ CMD ["python", "app.py"]
 
 # For standalone model service image labels
 LABEL org.opencontainers.image.title="Model Service"
-LABEL org.opencontainers.image.description="Microservice architecture for AI model deployment"
-LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.description="Microservice architecture for AI model deployment with resource monitoring"
+LABEL org.opencontainers.image.version="1.1.0"

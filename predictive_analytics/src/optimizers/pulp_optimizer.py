@@ -8,7 +8,7 @@ from pulp import *
 import logging
 from typing import Dict, List, Optional, Tuple
 from .base_optimizer import BaseOptimizer
-from ..config import OPTIMIZATION_CONFIG
+from ..config import OPTIMIZATION_CONFIG, METRICS_MAPPING
 
 logger = logging.getLogger(__name__)
 
@@ -57,25 +57,52 @@ class PuLPOptimizer(BaseOptimizer):
         try:
             # 映射新指标到算法所需变量
             mapped_predictions = predictions.copy()
+            
+            # 检查是否有真实资源指标数据，如果有则优先使用
+            logger.info(f"Available columns in predictions: {predictions.columns.tolist()}")
+            
+            real_metrics_found = []
+            for standard_metric, real_metric in METRICS_MAPPING.items():
+                logger.info(f"Checking if {real_metric} is available for {standard_metric}")
+                if real_metric in mapped_predictions.columns:
+                    logger.info(f"Using real system metric: {real_metric} instead of derived {standard_metric}")
+                    # 创建或更新标准指标列，使用真实资源指标数据
+                    mapped_predictions[standard_metric] = mapped_predictions[real_metric]
+                    real_metrics_found.append(real_metric)
+                    
+            if not real_metrics_found:
+                logger.warning("No real system metrics found in predictions data. Falling back to derived metrics.")
+            
+            # 如果没有真实指标数据，则使用传统的派生计算方法作为备选
             if 'cpu_usage' not in mapped_predictions.columns and 'requests_total' in mapped_predictions.columns:
+                logger.info("Using derived CPU usage from requests_total")
                 # 将请求总数映射到合理的CPU使用率范围(0-100%)
-                # 使用sigmoid函数将任意请求数映射到0-100范围
                 max_request = mapped_predictions['requests_total'].max()
                 if max_request > 0:
-                    # 使用sigmoid函数，控制最大值在100以内
+                    # 使用线性映射，控制最大值在100以内
                     mapped_predictions['cpu_usage'] = 100 * (mapped_predictions['requests_total'] / max_request) * 0.8  # 最大使用率控制在80%
                     # 确保不会超过100%
                     mapped_predictions['cpu_usage'] = mapped_predictions['cpu_usage'].clip(0, 100)
                 else:
                     mapped_predictions['cpu_usage'] = 10  # 默认低负载
+                    
             if 'memory_usage' not in mapped_predictions.columns and 'latency_avg' in mapped_predictions.columns:
+                logger.info("Using derived memory usage from latency_avg")
                 # 将平均延迟映射到合理的内存使用范围
                 mapped_predictions['memory_usage'] = (mapped_predictions['latency_avg'] * 10).clip(0.1, 100)
+                
             if 'network_io' not in mapped_predictions.columns and 'latency_p95' in mapped_predictions.columns:
+                logger.info("Using derived network I/O from latency_p95")
                 # 将P95延迟映射到网络IO
                 mapped_predictions['network_io'] = (mapped_predictions['latency_p95'] * 10).clip(0.1, 100)
+                
             if 'latency' not in mapped_predictions.columns and 'latency_p99' in mapped_predictions.columns:
                 mapped_predictions['latency'] = mapped_predictions['latency_p99']
+            
+            # 记录使用了哪些指标数据
+            logger.info(f"Resource metrics used for optimization: CPU={mapped_predictions['cpu_usage'].max():.2f}%, "
+                       f"Memory={mapped_predictions['memory_usage'].max():.2f}%, "
+                       f"Network={mapped_predictions['network_io'].max():.2f}")
             
             # 创建优化问题
             prob = LpProblem("Resource_Allocation", LpMinimize)

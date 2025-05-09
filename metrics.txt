@@ -1,0 +1,223 @@
+# HELP python_gc_objects_collected_total Objects collected during gc
+# TYPE python_gc_objects_collected_total counter
+python_gc_objects_collected_total{generation="0"} 54351.0
+python_gc_objects_collected_total{generation="1"} 7066.0
+python_gc_objects_collected_total{generation="2"} 28.0
+# HELP python_gc_objects_uncollectable_total Uncollectable objects found during GC
+# TYPE python_gc_objects_uncollectable_total counter
+python_gc_objects_uncollectable_total{generation="0"} 0.0
+python_gc_objects_uncollectable_total{generation="1"} 0.0
+python_gc_objects_uncollectable_total{generation="2"} 0.0
+# HELP python_gc_collections_total Number of times this generation was collected
+# TYPE python_gc_collections_total counter
+python_gc_collections_total{generation="0"} 426.0
+python_gc_collections_total{generation="1"} 38.0
+python_gc_collections_total{generation="2"} 2.0
+# HELP python_info Python platform information
+# TYPE python_info gauge
+python_info{implementation="CPython",major="3",minor="9",patchlevel="22",version="3.9.22"} 1.0
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+process_virtual_memory_bytes 1.622618112e+09
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 1.34086656e+08
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1.74677246157e+09
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 66.0
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 22.0
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+process_max_fds 1.048576e+06
+# HELP model_service_requests_total Total model service requests
+# TYPE model_service_requests_total counter
+model_service_requests_total{endpoint="/predict",model_id="model2"} 0.0
+model_service_requests_total{endpoint="/predict",model_id="model1"} 8.0
+model_service_requests_total{endpoint="/upload_model",model_id="global"} 0.0
+model_service_requests_total{endpoint="/deploy",model_id="global"} 2.0
+model_service_requests_total{endpoint="/delete_model",model_id="global"} 0.0
+model_service_requests_total{endpoint="/stop_deployment",model_id="global"} 4.0
+model_service_requests_total{endpoint="/models/status",model_id="global"} 132.0
+model_service_requests_total{endpoint="/health",model_id="global"} 0.0
+model_service_requests_total{endpoint="/metrics",model_id="global"} 305.0
+# HELP model_service_requests_created Total model service requests
+# TYPE model_service_requests_created gauge
+model_service_requests_created{endpoint="/predict",model_id="model2"} 1.7467724656380744e+09
+model_service_requests_created{endpoint="/predict",model_id="model1"} 1.746772465638898e+09
+model_service_requests_created{endpoint="/upload_model",model_id="global"} 1.7467724656390538e+09
+model_service_requests_created{endpoint="/deploy",model_id="global"} 1.7467724656393762e+09
+model_service_requests_created{endpoint="/delete_model",model_id="global"} 1.7467724656395304e+09
+model_service_requests_created{endpoint="/stop_deployment",model_id="global"} 1.7467724656396835e+09
+model_service_requests_created{endpoint="/models/status",model_id="global"} 1.7467724656398363e+09
+model_service_requests_created{endpoint="/health",model_id="global"} 1.746772465639978e+09
+model_service_requests_created{endpoint="/metrics",model_id="global"} 1.7467724656401174e+09
+# HELP model_service_response_time_seconds Response time in seconds
+# TYPE model_service_response_time_seconds histogram
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.005",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.01",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.025",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.05",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.075",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.1",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.25",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.5",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.75",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="1.0",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="2.5",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="5.0",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="7.5",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="10.0",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="+Inf",model_id="model2"} 0.0
+model_service_response_time_seconds_count{endpoint="/predict",model_id="model2"} 0.0
+model_service_response_time_seconds_sum{endpoint="/predict",model_id="model2"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.005",model_id="model1"} 2.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.01",model_id="model1"} 7.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.025",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.05",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.075",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.1",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.25",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.5",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="0.75",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="1.0",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="2.5",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="5.0",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="7.5",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="10.0",model_id="model1"} 8.0
+model_service_response_time_seconds_bucket{endpoint="/predict",le="+Inf",model_id="model1"} 8.0
+model_service_response_time_seconds_count{endpoint="/predict",model_id="model1"} 8.0
+model_service_response_time_seconds_sum{endpoint="/predict",model_id="model1"} 0.0509682489791885
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="0.005",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="0.01",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="0.025",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="0.05",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="0.075",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="0.1",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="0.25",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="0.5",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="0.75",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="1.0",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="2.5",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="5.0",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="7.5",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="10.0",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/upload_model",le="+Inf",model_id="global"} 0.0
+model_service_response_time_seconds_count{endpoint="/upload_model",model_id="global"} 0.0
+model_service_response_time_seconds_sum{endpoint="/upload_model",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="0.005",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="0.01",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="0.025",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="0.05",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="0.075",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="0.1",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="0.25",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="0.5",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="0.75",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="1.0",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="2.5",model_id="global"} 1.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="5.0",model_id="global"} 2.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="7.5",model_id="global"} 2.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="10.0",model_id="global"} 2.0
+model_service_response_time_seconds_bucket{endpoint="/deploy",le="+Inf",model_id="global"} 2.0
+model_service_response_time_seconds_count{endpoint="/deploy",model_id="global"} 2.0
+model_service_response_time_seconds_sum{endpoint="/deploy",model_id="global"} 4.587466417986434
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="0.005",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="0.01",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="0.025",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="0.05",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="0.075",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="0.1",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="0.25",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="0.5",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="0.75",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="1.0",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="2.5",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="5.0",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="7.5",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="10.0",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/delete_model",le="+Inf",model_id="global"} 0.0
+model_service_response_time_seconds_count{endpoint="/delete_model",model_id="global"} 0.0
+model_service_response_time_seconds_sum{endpoint="/delete_model",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="0.005",model_id="global"} 2.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="0.01",model_id="global"} 3.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="0.025",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="0.05",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="0.075",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="0.1",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="0.25",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="0.5",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="0.75",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="1.0",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="2.5",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="5.0",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="7.5",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="10.0",model_id="global"} 4.0
+model_service_response_time_seconds_bucket{endpoint="/stop_deployment",le="+Inf",model_id="global"} 4.0
+model_service_response_time_seconds_count{endpoint="/stop_deployment",model_id="global"} 4.0
+model_service_response_time_seconds_sum{endpoint="/stop_deployment",model_id="global"} 0.033230999018996954
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="0.005",model_id="global"} 26.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="0.01",model_id="global"} 80.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="0.025",model_id="global"} 123.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="0.05",model_id="global"} 130.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="0.075",model_id="global"} 132.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="0.1",model_id="global"} 132.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="0.25",model_id="global"} 132.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="0.5",model_id="global"} 132.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="0.75",model_id="global"} 132.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="1.0",model_id="global"} 132.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="2.5",model_id="global"} 132.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="5.0",model_id="global"} 132.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="7.5",model_id="global"} 132.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="10.0",model_id="global"} 132.0
+model_service_response_time_seconds_bucket{endpoint="/models/status",le="+Inf",model_id="global"} 132.0
+model_service_response_time_seconds_count{endpoint="/models/status",model_id="global"} 132.0
+model_service_response_time_seconds_sum{endpoint="/models/status",model_id="global"} 1.4884949199622497
+model_service_response_time_seconds_bucket{endpoint="/health",le="0.005",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="0.01",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="0.025",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="0.05",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="0.075",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="0.1",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="0.25",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="0.5",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="0.75",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="1.0",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="2.5",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="5.0",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="7.5",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="10.0",model_id="global"} 0.0
+model_service_response_time_seconds_bucket{endpoint="/health",le="+Inf",model_id="global"} 0.0
+model_service_response_time_seconds_count{endpoint="/health",model_id="global"} 0.0
+model_service_response_time_seconds_sum{endpoint="/health",model_id="global"} 0.0
+# HELP model_service_response_time_seconds_created Response time in seconds
+# TYPE model_service_response_time_seconds_created gauge
+model_service_response_time_seconds_created{endpoint="/predict",model_id="model2"} 1.7467724656381066e+09
+model_service_response_time_seconds_created{endpoint="/predict",model_id="model1"} 1.7467724656389058e+09
+model_service_response_time_seconds_created{endpoint="/upload_model",model_id="global"} 1.746772465639061e+09
+model_service_response_time_seconds_created{endpoint="/deploy",model_id="global"} 1.7467724656393828e+09
+model_service_response_time_seconds_created{endpoint="/delete_model",model_id="global"} 1.7467724656395383e+09
+model_service_response_time_seconds_created{endpoint="/stop_deployment",model_id="global"} 1.7467724656396902e+09
+model_service_response_time_seconds_created{endpoint="/models/status",model_id="global"} 1.7467724656398418e+09
+model_service_response_time_seconds_created{endpoint="/health",model_id="global"} 1.746772465639987e+09
+# HELP model_service_active_count Number of active model services
+# TYPE model_service_active_count gauge
+model_service_active_count 2.0
+# HELP model_errors_total Total error count
+# TYPE model_errors_total counter
+model_errors_total{error_type="stop_deployment",model_id="model1"} 1.0
+model_errors_total{error_type="stop_deployment",model_id="model2"} 1.0
+# HELP model_errors_created Total error count
+# TYPE model_errors_created gauge
+model_errors_created{error_type="stop_deployment",model_id="model1"} 1.7467756055946372e+09
+model_errors_created{error_type="stop_deployment",model_id="model2"} 1.7467756181040902e+09
+# HELP model_memory_usage_bytes Memory usage in bytes
+# TYPE model_memory_usage_bytes gauge
+# HELP model_cpu_usage_percent CPU usage percentage
+# TYPE model_cpu_usage_percent gauge
+# HELP model_prediction_accuracy Model prediction accuracy
+# TYPE model_prediction_accuracy gauge

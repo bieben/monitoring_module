@@ -1,11 +1,11 @@
 {
-  "model1": {
-    "model_id": "model1",
-    "port": 8001,
-    "url": "http://localhost:8001",
+  "test_model": {
+    "model_id": "test_model",
+    "port": 8000,
+    "url": "http://localhost:8000",
     "status": "healthy",
     "metadata": {
-      "upload_time": 1746768154.0,
+      "upload_time": 1746778733.0,
       "feature_count": 8
     },
     "features": [
@@ -18,29 +18,7 @@
       "Latitude",
       "Longitude"
     ],
-    "registered_at": 1746768505.1395926,
-    "last_updated": 1746772089.6847363
-  },
-  "model2": {
-    "model_id": "model2",
-    "port": 8002,
-    "url": "http://localhost:8002",
-    "status": "healthy",
-    "metadata": {
-      "upload_time": 1746770104.0,
-      "feature_count": 8
-    },
-    "features": [
-      "MedInc",
-      "HouseAge",
-      "AveRooms",
-      "AveBedrms",
-      "Population",
-      "AveOccup",
-      "Latitude",
-      "Longitude"
-    ],
-    "registered_at": 1746770111.6093953,
-    "last_updated": 1746772089.6880095
+    "registered_at": 1746779301.8305004,
+    "last_updated": 1746781965.0278091
   }
 }

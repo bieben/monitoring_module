@@ -18,7 +18,10 @@ PROMETHEUS_CONFIG = {
         'requests_total': 'model_service_requests_total{endpoint="/predict"}',
         'latency_avg': 'rate(model_service_response_time_seconds_sum{endpoint="/predict"}[5m]) / rate(model_service_response_time_seconds_count{endpoint="/predict"}[5m])',
         'latency_p95': 'histogram_quantile(0.95, sum(rate(model_service_response_time_seconds_bucket{endpoint="/predict"}[5m])) by (le, model_id))',
-        'latency_p99': 'histogram_quantile(0.99, sum(rate(model_service_response_time_seconds_bucket{endpoint="/predict"}[5m])) by (le, model_id))'
+        'latency_p99': 'histogram_quantile(0.99, sum(rate(model_service_response_time_seconds_bucket{endpoint="/predict"}[5m])) by (le, model_id))',
+        'cpu_usage_real': '100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)',  # CPU使用率百分比
+        'memory_usage_real': '(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100',     # 内存使用率百分比
+        'network_io_real': 'sum(rate(node_network_receive_bytes_total[1m]) + rate(node_network_transmit_bytes_total[1m]))'  # 网络IO字节/秒
     },
     'query_timeout': 30,
     'retry_attempts': 3,
@@ -28,7 +31,10 @@ PROMETHEUS_CONFIG = {
             'requests_total': (0, 1000000),
             'latency_avg': (0, 100),
             'latency_p95': (0, 100),
-            'latency_p99': (0, 100)
+            'latency_p99': (0, 100),
+            'cpu_usage_real': (0, 100),             # CPU使用率范围0-100%
+            'memory_usage_real': (0, 100),          # 内存使用率范围0-100%
+            'network_io_real': (0, 10 * 1024 * 1024 * 1024)  # 最大10GB/s网络带宽
         }
     }
 }
@@ -174,4 +180,11 @@ LOGGING_CONFIG = {
             'level': 'DEBUG'
         }
     }
+}
+
+# 定义真实资源指标和派生指标之间的映射关系
+METRICS_MAPPING = {
+    'cpu_usage': 'cpu_usage_real',  # 优先使用真实CPU指标
+    'memory_usage': 'memory_usage_real',  # 优先使用真实内存指标
+    'network_io': 'network_io_real'  # 优先使用真实网络IO指标
 } 

@@ -40,3 +40,20 @@ scrape_configs:
       - source_labels: [__meta_dns_name]
         target_label: service
         replacement: 'model-runner'
+
+  # 添加单独的作业专门用于收集模型资源指标
+  - job_name: 'model-metrics'
+    static_configs:
+      - targets: ['model-service:5000']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'instance_model_.*'
+        action: 'keep'
+
+  # 添加Node Exporter作为监控目标，用于收集系统资源使用情况
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    metrics_path: '/metrics'
