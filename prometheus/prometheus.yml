@@ -2,6 +2,17 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# 添加告警规则文件配置
+rule_files:
+  - "alert_rules.yaml"
+
+# Alertmanager 配置
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+      - alertmanager:9093
+
 scrape_configs:
   - job_name: 'model-service'
     static_configs:

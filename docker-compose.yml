@@ -46,6 +46,7 @@ services:
       - MODEL_SERVICE_PORT_START=8000
       - MODEL_SERVICE_PORT_END=8100
     command: python app.py
+    restart: always
     networks:
       - app-network
 
@@ -83,10 +84,30 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/alert_rules.yaml:/etc/prometheus/alert_rules.yaml
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
+    depends_on:
+      - alertmanager
     healthcheck:
       test: wget -q --spider http://localhost:9090/-/healthy || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
+
+  alertmanager:
+    image: prom/alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/config.yml
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+    healthcheck:
+      test: wget -q --spider http://localhost:9093/-/healthy || exit 1
       interval: 30s
       timeout: 10s
       retries: 3

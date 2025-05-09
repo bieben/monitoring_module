@@ -1,0 +1,20 @@
+groups:
+- name: model-alerts
+  rules:
+  - alert: HighLatency
+    expr: rate(model_service_response_time_seconds_sum[5m]) / rate(model_service_response_time_seconds_count[5m]) > 1.0
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High model latency"
+      description: "Model prediction latency has been over 1s for 2 minutes"
+
+  - alert: PredictionErrorSpike
+    expr: sum by (model_id) (increase(model_errors_total[5m])) > 3
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Spike in prediction errors"
+      description: "More than 3 errors in last 5 minutes" 

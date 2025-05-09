@@ -15,10 +15,10 @@ LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 PROMETHEUS_CONFIG = {
     'url': f"{PROMETHEUS_URL}/api/v1/query_range",
     'metrics': {
-        'requests_total': 'model_predictions_total',
-        'latency_avg': 'rate(model_prediction_latency_seconds_sum[5m]) / rate(model_prediction_latency_seconds_count[5m])',
-        'latency_p95': 'histogram_quantile(0.95, sum(rate(model_prediction_latency_seconds_bucket[5m])) by (le, model_id))',
-        'latency_p99': 'histogram_quantile(0.99, sum(rate(model_prediction_latency_seconds_bucket[5m])) by (le, model_id))'
+        'requests_total': 'model_service_requests_total{endpoint="/predict"}',
+        'latency_avg': 'rate(model_service_response_time_seconds_sum{endpoint="/predict"}[5m]) / rate(model_service_response_time_seconds_count{endpoint="/predict"}[5m])',
+        'latency_p95': 'histogram_quantile(0.95, sum(rate(model_service_response_time_seconds_bucket{endpoint="/predict"}[5m])) by (le, model_id))',
+        'latency_p99': 'histogram_quantile(0.99, sum(rate(model_service_response_time_seconds_bucket{endpoint="/predict"}[5m])) by (le, model_id))'
     },
     'query_timeout': 30,
     'retry_attempts': 3,

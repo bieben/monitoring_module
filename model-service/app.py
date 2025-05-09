@@ -22,9 +22,12 @@ CORS(app)  # 启用 CORS
 REQUEST_COUNT = Counter('model_service_requests_total', 'Total model service requests', ['endpoint', 'model_id'])
 RESPONSE_TIME = Histogram('model_service_response_time_seconds', 'Response time in seconds', ['endpoint', 'model_id'])
 ACTIVE_SERVICES = Gauge('model_service_active_count', 'Number of active model services')
+# 注意：model_errors_total指标已在alert_rules.py中定义
 
 # 初始化服务
 ml_service = MLService()
+# 使用MLService中的alert_rules访问错误计数器
+model_errors_counter = ml_service.alert_rules.error_counter
 
 # 更新活跃服务数量
 def update_active_services_metric():
@@ -43,6 +46,21 @@ def init_metrics():
     
     REQUEST_COUNT.labels(endpoint="/deploy", model_id="global")
     RESPONSE_TIME.labels(endpoint="/deploy", model_id="global")
+    
+    REQUEST_COUNT.labels(endpoint="/delete_model", model_id="global")
+    RESPONSE_TIME.labels(endpoint="/delete_model", model_id="global")
+    
+    REQUEST_COUNT.labels(endpoint="/stop_deployment", model_id="global")
+    RESPONSE_TIME.labels(endpoint="/stop_deployment", model_id="global")
+    
+    REQUEST_COUNT.labels(endpoint="/models/status", model_id="global")
+    RESPONSE_TIME.labels(endpoint="/models/status", model_id="global")
+    
+    REQUEST_COUNT.labels(endpoint="/health", model_id="global")
+    RESPONSE_TIME.labels(endpoint="/health", model_id="global")
+    
+    REQUEST_COUNT.labels(endpoint="/metrics", model_id="global")
+    # 注意：不要为 /metrics 添加响应时间监控，这会导致递归问题
 
 init_metrics()
 
@@ -110,64 +128,153 @@ def predict():
     
     # 执行预测并计时
     with RESPONSE_TIME.labels(endpoint="/predict", model_id=model_id).time():
-        result, status_code = ml_service.handle_prediction(data)
-    
-    return jsonify(result), status_code
+        try:
+            result, status_code = ml_service.handle_prediction(data)
+            
+            # 处理非异常错误 (404, 500等)
+            if status_code >= 400:
+                error_type = "not_found" if status_code == 404 else "prediction"
+                model_errors_counter.labels(model_id=model_id, error_type=error_type).inc()
+                logger.error(f"Prediction error for model {model_id}: {result.get('error', 'Unknown error')}")
+                
+            return jsonify(result), status_code
+            
+        except Exception as e:
+            # 增加错误计数
+            model_errors_counter.labels(model_id=model_id, error_type="prediction").inc()
+            # 记录详细错误日志
+            logger.error(f"Prediction error for model {model_id}: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Prediction failed: {str(e)}"}), 500
 
 @app.route("/models/status")
 def models_status():
     """获取所有已注册模型的状态"""
-    # 更新活跃服务数量指标
-    update_active_services_metric()
+    # 记录请求指标
+    REQUEST_COUNT.labels(endpoint="/models/status", model_id="global").inc()
     
-    return jsonify(*ml_service.get_models_status())
+    # 执行状态获取并计时
+    with RESPONSE_TIME.labels(endpoint="/models/status", model_id="global").time():
+        try:
+            # 更新活跃服务数量指标
+            update_active_services_metric()
+            
+            result, status_code = ml_service.get_models_status()
+            return jsonify(result), status_code
+            
+        except Exception as e:
+            # 增加错误计数
+            model_errors_counter.labels(model_id="global", error_type="status").inc()
+            # 记录详细错误日志
+            logger.error(f"Failed to get models status: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to get models status: {str(e)}"}), 500
 
 @app.route("/delete_model/<model_id>", methods=["DELETE"])
 def delete_model(model_id):
     """删除模型"""
-    result, status_code = ml_service.delete_model(model_id)
+    # 记录请求指标
+    REQUEST_COUNT.labels(endpoint="/delete_model", model_id="global").inc()
     
-    # 更新活跃服务数量指标
-    update_active_services_metric()
-    
-    return jsonify(result), status_code
+    # 执行删除操作并计时
+    with RESPONSE_TIME.labels(endpoint="/delete_model", model_id="global").time():
+        try:
+            result, status_code = ml_service.delete_model(model_id)
+            
+            # 处理非异常错误
+            if status_code >= 400:
+                error_type = "not_found" if status_code == 404 else "deletion"
+                model_errors_counter.labels(model_id=model_id, error_type=error_type).inc()
+                logger.error(f"Model deletion error for {model_id}: {result.get('error', 'Unknown error')}")
+            
+            # 更新活跃服务数量指标
+            update_active_services_metric()
+            
+            return jsonify(result), status_code
+            
+        except Exception as e:
+            # 增加错误计数
+            model_errors_counter.labels(model_id=model_id, error_type="deletion").inc()
+            # 记录详细错误日志
+            logger.error(f"Model deletion error for {model_id}: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Model deletion failed: {str(e)}"}), 500
 
 @app.route("/stop_deployment/<model_id>", methods=["POST"])
 def stop_deployment(model_id):
     """停止模型部署但不删除模型"""
-    result, status_code = ml_service.stop_deployment(model_id)
+    # 记录请求指标
+    REQUEST_COUNT.labels(endpoint="/stop_deployment", model_id="global").inc()
     
-    # 更新活跃服务数量指标
-    update_active_services_metric()
-    
-    return jsonify(result), status_code
+    # 执行停止操作并计时
+    with RESPONSE_TIME.labels(endpoint="/stop_deployment", model_id="global").time():
+        try:
+            result, status_code = ml_service.stop_deployment(model_id)
+            
+            # 处理非异常错误
+            if status_code >= 400:
+                error_type = "not_found" if status_code == 404 else "stop_deployment"
+                model_errors_counter.labels(model_id=model_id, error_type=error_type).inc()
+                logger.error(f"Stop deployment error for {model_id}: {result.get('error', 'Unknown error')}")
+            
+            # 更新活跃服务数量指标
+            update_active_services_metric()
+            
+            return jsonify(result), status_code
+            
+        except Exception as e:
+            # 增加错误计数
+            model_errors_counter.labels(model_id=model_id, error_type="stop_deployment").inc()
+            # 记录详细错误日志
+            logger.error(f"Stop deployment error for {model_id}: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Stop deployment failed: {str(e)}"}), 500
 
 @app.route("/metrics")
 def metrics():
     """Prometheus指标接口"""
-    return generate_latest(), 200, {'Content-Type': 'text/plain'}
+    # 记录请求计数，但不记录响应时间（避免递归问题）
+    REQUEST_COUNT.labels(endpoint="/metrics", model_id="global").inc()
+    
+    try:
+        return generate_latest(), 200, {'Content-Type': 'text/plain'}
+    except Exception as e:
+        # 增加错误计数
+        model_errors_counter.labels(model_id="global", error_type="metrics").inc()
+        # 记录详细错误日志
+        logger.error(f"Failed to generate metrics: {str(e)}", exc_info=True)
+        return "Error generating metrics", 500, {'Content-Type': 'text/plain'}
 
 @app.route("/health")
 def health():
     """健康检查接口"""
-    # 更新活跃服务数量指标
-    update_active_services_metric()
+    # 记录请求指标
+    REQUEST_COUNT.labels(endpoint="/health", model_id="global").inc()
     
-    active_count = sum(1 for _, process_info in ml_service.model_processes.items() 
-                      if process_info.get('status') == 'running')
-    
-    # 可选：执行自检
-    health_status = {
-        "status": "healthy",
-        "service": "model-service",
-        "timestamp": time.time(),
-        "models": {
-            "total": len(ml_service.model_registry),
-            "deployed": active_count
-        }
-    }
-    
-    return jsonify(health_status), 200
+    # 执行健康检查并计时
+    with RESPONSE_TIME.labels(endpoint="/health", model_id="global").time():
+        try:
+            # 更新活跃服务数量指标
+            update_active_services_metric()
+            
+            active_count = sum(1 for _, process_info in ml_service.model_processes.items() 
+                              if process_info.get('status') == 'running')
+            
+            # 可选：执行自检
+            health_status = {
+                "status": "healthy",
+                "service": "model-service",
+                "timestamp": time.time(),
+                "models": {
+                    "total": len(ml_service.model_registry),
+                    "deployed": active_count
+                }
+            }
+            
+            return jsonify(health_status), 200
+            
+        except Exception as e:
+            # 增加错误计数
+            model_errors_counter.labels(model_id="global", error_type="health").inc()
+            # 记录详细错误日志
+            logger.error(f"Health check failed: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Health check failed: {str(e)}"}), 500
 
 def run_registry():
     """在独立线程中运行注册中心服务"""
