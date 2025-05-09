@@ -10,8 +10,8 @@
         "error_window": 100
     },
     "resource_rules": {
-        "cpu_threshold": 80.0,
-        "memory_threshold": 85.0,
+        "cpu_threshold": 49.0,
+        "memory_threshold": 49.0,
         "disk_threshold": 90.0
     },
     "model_performance_rules": {

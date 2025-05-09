@@ -31,6 +31,32 @@ ml_service = MLService()
 # 使用MLService中的alert_rules访问错误计数器
 model_errors_counter = ml_service.alert_rules.error_counter
 
+# 定义后台任务
+def background_tasks():
+    """执行后台任务"""
+    # 每个循环间隔时间（秒）
+    interval = 60
+    
+    while True:
+        try:
+            # 更新活跃服务数量
+            update_active_services_metric()
+            
+            # 检查和更新告警
+            ml_service.get_active_alerts()
+            
+            # 记录后台任务已执行
+            logger.debug(f"Background tasks executed at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        except Exception as e:
+            logger.error(f"Error in background tasks: {str(e)}")
+        
+        # 休眠指定时间
+        time.sleep(interval)
+
+# 启动后台任务线程
+background_thread = threading.Thread(target=background_tasks, daemon=True)
+background_thread.start()
+
 # 更新活跃服务数量
 def update_active_services_metric():
     count = sum(1 for _, process_info in ml_service.model_processes.items() 
@@ -60,6 +86,16 @@ def init_metrics():
     
     REQUEST_COUNT.labels(endpoint="/health", model_id="global")
     RESPONSE_TIME.labels(endpoint="/health", model_id="global")
+    
+    # 添加日志相关端点的指标
+    REQUEST_COUNT.labels(endpoint="/logs", model_id="global")
+    RESPONSE_TIME.labels(endpoint="/logs", model_id="global")
+    
+    REQUEST_COUNT.labels(endpoint="/logs/summary", model_id="global")
+    RESPONSE_TIME.labels(endpoint="/logs/summary", model_id="global")
+    
+    REQUEST_COUNT.labels(endpoint="/logs/clear", model_id="global")
+    RESPONSE_TIME.labels(endpoint="/logs/clear", model_id="global")
     
     REQUEST_COUNT.labels(endpoint="/metrics", model_id="global")
     # 注意：不要为 /metrics 添加响应时间监控，这会导致递归问题
@@ -243,6 +279,198 @@ def metrics():
         logger.error(f"Failed to generate metrics: {str(e)}", exc_info=True)
         return "Error generating metrics", 500, {'Content-Type': 'text/plain'}
 
+@app.route("/logs")
+def get_logs():
+    """获取日志API"""
+    # 记录请求计数
+    REQUEST_COUNT.labels(endpoint="/logs", model_id="global").inc()
+
+    # 执行查询并计时
+    with RESPONSE_TIME.labels(endpoint="/logs", model_id="global").time():
+        try:
+            # 从请求中获取过滤参数
+            limit = request.args.get('limit', default=50, type=int)
+            offset = request.args.get('offset', default=0, type=int)
+            level = request.args.get('level')
+            model_id = request.args.get('model_id')
+            start_time = request.args.get('start_time', type=float)
+            end_time = request.args.get('end_time', type=float)
+            query = request.args.get('query')
+            
+            # 使用LogManager查询日志
+            logs_response = ml_service.log_manager.query_logs(
+                limit=limit,
+                offset=offset,
+                level=level,
+                model_id=model_id,
+                start_time=start_time,
+                end_time=end_time,
+                query=query
+            )
+            
+            return jsonify(logs_response), 200
+        except Exception as e:
+            # 增加错误计数
+            model_errors_counter.labels(model_id="global", error_type="logs").inc()
+            # 记录详细错误日志
+            logger.error(f"Failed to retrieve logs: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to retrieve logs: {str(e)}"}), 500
+
+@app.route("/logs/summary")
+def get_logs_summary():
+    """获取日志摘要统计信息"""
+    # 记录请求计数
+    REQUEST_COUNT.labels(endpoint="/logs/summary", model_id="global").inc()
+    
+    # 执行查询并计时
+    with RESPONSE_TIME.labels(endpoint="/logs/summary", model_id="global").time():
+        try:
+            # 获取日志摘要
+            summary = ml_service.log_manager.get_log_summary()
+            return jsonify(summary), 200
+        except Exception as e:
+            # 增加错误计数
+            model_errors_counter.labels(model_id="global", error_type="logs_summary").inc()
+            # 记录详细错误日志
+            logger.error(f"Failed to retrieve logs summary: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to retrieve logs summary: {str(e)}"}), 500
+
+@app.route("/logs/clear", methods=["POST"])
+def clear_logs():
+    """清空日志缓存API"""
+    # 记录请求计数
+    REQUEST_COUNT.labels(endpoint="/logs/clear", model_id="global").inc()
+
+    # 执行清理并计时
+    with RESPONSE_TIME.labels(endpoint="/logs/clear", model_id="global").time():
+        try:
+            ml_service.log_manager.clear_logs()
+            return jsonify({"message": "Logs cleared successfully"}), 200
+        except Exception as e:
+            # 增加错误计数
+            model_errors_counter.labels(model_id="global", error_type="logs_clear").inc()
+            # 记录详细错误日志
+            logger.error(f"Failed to clear logs: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to clear logs: {str(e)}"}), 500
+
+@app.route("/alerts")
+def get_alerts():
+    """获取当前活跃的告警API"""
+    # 记录请求计数
+    REQUEST_COUNT.labels(endpoint="/alerts", model_id="global").inc()
+
+    # 执行查询并计时
+    with RESPONSE_TIME.labels(endpoint="/alerts", model_id="global").time():
+        try:
+            # 获取告警列表
+            alerts = ml_service.get_active_alerts()
+            
+            # 根据前端需要的格式转换数据
+            formatted_alerts = []
+            for alert in alerts:
+                formatted_alerts.append({
+                    "name": alert.get("name", "Unknown Alert"),
+                    "type": alert.get("type", "unknown"),
+                    "level": alert.get("level", "INFO"),
+                    "message": alert.get("message", ""),
+                    "value": alert.get("value", 0),
+                    "threshold": alert.get("threshold", 0),
+                    "active": alert.get("active", False),
+                    "model_id": alert.get("model_id", ""),
+                    "since": alert.get("since", "")
+                })
+            
+            return jsonify(formatted_alerts), 200
+        except Exception as e:
+            # 增加错误计数
+            model_errors_counter.labels(model_id="global", error_type="alerts").inc()
+            # 记录详细错误日志
+            logger.error(f"Failed to retrieve alerts: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to retrieve alerts: {str(e)}"}), 500
+
+@app.route("/alerts/config", methods=["GET", "POST"])
+def alerts_config():
+    """获取或更新告警配置阈值"""
+    # 记录请求计数
+    REQUEST_COUNT.labels(endpoint="/alerts/config", model_id="global").inc()
+
+    # 执行操作并计时
+    with RESPONSE_TIME.labels(endpoint="/alerts/config", model_id="global").time():
+        try:
+            # 处理GET请求 - 返回当前配置
+            if request.method == "GET":
+                config = ml_service.alert_rules.get_config("resource_rules")
+                return jsonify({
+                    "status": "success",
+                    "config": {
+                        "cpu_threshold": config.get("cpu_threshold", 80.0),
+                        "memory_threshold": config.get("memory_threshold", 85.0),
+                        "disk_threshold": config.get("disk_threshold", 90.0)
+                    }
+                }), 200
+                
+            # 处理POST请求 - 更新配置
+            elif request.method == "POST":
+                data = request.get_json()
+                if not data:
+                    return jsonify({"error": "No data provided"}), 400
+                
+                # 获取当前配置
+                current_config = ml_service.alert_rules.get_config("resource_rules")
+                
+                # 更新值 (仅更新提供的值)
+                update_values = {}
+                
+                if "cpu_threshold" in data:
+                    try:
+                        cpu_threshold = float(data["cpu_threshold"])
+                        if cpu_threshold < 0 or cpu_threshold > 100:
+                            return jsonify({"error": "CPU threshold must be between 0 and 100"}), 400
+                        update_values["cpu_threshold"] = cpu_threshold
+                    except (ValueError, TypeError):
+                        return jsonify({"error": "Invalid CPU threshold value"}), 400
+                
+                if "memory_threshold" in data:
+                    try:
+                        memory_threshold = float(data["memory_threshold"])
+                        if memory_threshold < 0 or memory_threshold > 100:
+                            return jsonify({"error": "Memory threshold must be between 0 and 100"}), 400
+                        update_values["memory_threshold"] = memory_threshold
+                    except (ValueError, TypeError):
+                        return jsonify({"error": "Invalid memory threshold value"}), 400
+                
+                if "disk_threshold" in data:
+                    try:
+                        disk_threshold = float(data["disk_threshold"])
+                        if disk_threshold < 0 or disk_threshold > 100:
+                            return jsonify({"error": "Disk threshold must be between 0 and 100"}), 400
+                        update_values["disk_threshold"] = disk_threshold
+                    except (ValueError, TypeError):
+                        return jsonify({"error": "Invalid disk threshold value"}), 400
+                
+                # 如果有值需要更新
+                if update_values:
+                    success = ml_service.alert_rules.update_category("resource_rules", update_values)
+                    if not success:
+                        return jsonify({"error": "Failed to update alert configuration"}), 500
+                    
+                    # 获取更新后的配置
+                    updated_config = ml_service.alert_rules.get_config("resource_rules")
+                    return jsonify({
+                        "status": "success",
+                        "message": "Alert configuration updated successfully",
+                        "config": updated_config
+                    }), 200
+                else:
+                    return jsonify({"message": "No changes to apply"}), 200
+
+        except Exception as e:
+            # 增加错误计数
+            model_errors_counter.labels(model_id="global", error_type="alerts_config").inc()
+            # 记录详细错误日志
+            logger.error(f"Failed to handle alert configuration: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to handle alert configuration: {str(e)}"}), 500
+
 @app.route("/health")
 def health():
     """健康检查接口"""
@@ -251,32 +479,26 @@ def health():
     
     # 执行健康检查并计时
     with RESPONSE_TIME.labels(endpoint="/health", model_id="global").time():
-        try:
-            # 更新活跃服务数量指标
-            update_active_services_metric()
-            
-            active_count = sum(1 for _, process_info in ml_service.model_processes.items() 
-                              if process_info.get('status') == 'running')
-            
-            # 可选：执行自检
-            health_status = {
-                "status": "healthy",
-                "service": "model-service",
-                "timestamp": time.time(),
-                "models": {
-                    "total": len(ml_service.model_registry),
-                    "deployed": active_count
-                }
-            }
-            
-            return jsonify(health_status), 200
-            
-        except Exception as e:
-            # 增加错误计数
-            model_errors_counter.labels(model_id="global", error_type="health").inc()
-            # 记录详细错误日志
-            logger.error(f"Health check failed: {str(e)}", exc_info=True)
-            return jsonify({"error": f"Health check failed: {str(e)}"}), 500
+        # 配置基本健康状态信息
+        health_info = {
+            "status": "up",
+            "uptime": int(time.time() - ml_service.start_time) if hasattr(ml_service, 'start_time') else 0,
+            "server_time": time.strftime('%Y-%m-%d %H:%M:%S'),
+            "models": {
+                "registered": len(ml_service.model_registry),
+                "deployed": len([m for m, info in ml_service.model_processes.items() if info.get('status') == 'running'])
+            },
+            "memory_usage": {
+                "percent": psutil.virtual_memory().percent,
+                "used_mb": round(psutil.virtual_memory().used / (1024 * 1024), 2)
+            },
+            "cpu_usage": {
+                "percent": psutil.cpu_percent(interval=0.1)
+            },
+            "metrics_enabled": True
+        }
+        
+        return jsonify(health_info)
 
 @app.route("/models/resources")
 def models_resources():

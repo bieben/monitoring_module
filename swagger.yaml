@@ -523,6 +523,334 @@ paths:
         '500':
           description: 服务器错误
 
+  # 日志API
+  /logs:
+    get:
+      tags:
+        - 监控
+      summary: 获取系统日志
+      description: 获取系统日志，支持过滤和分页
+      parameters:
+        - name: limit
+          in: query
+          description: 每页返回的日志数量
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          description: 分页偏移量
+          schema:
+            type: integer
+            default: 0
+        - name: level
+          in: query
+          description: 日志级别过滤
+          schema:
+            type: string
+            enum: [INFO, WARNING, ERROR, CRITICAL]
+        - name: model_id
+          in: query
+          description: 按模型ID过滤
+          schema:
+            type: string
+        - name: start_time
+          in: query
+          description: 开始时间戳（秒）
+          schema:
+            type: number
+        - name: end_time
+          in: query
+          description: 结束时间戳（秒）
+          schema:
+            type: number
+        - name: query
+          in: query
+          description: 文本搜索查询
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功返回日志
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp:
+                          type: string
+                          format: date-time
+                          example: '2023-05-01T12:34:56.789Z'
+                        level:
+                          type: string
+                          example: 'INFO'
+                        model_id:
+                          type: string
+                          example: 'sentiment_analysis'
+                        message:
+                          type: string
+                          example: 'Prediction request completed in 345ms'
+                        context:
+                          type: object
+                          additionalProperties: true
+                  total:
+                    type: integer
+                    example: 1245
+                  offset:
+                    type: integer
+                    example: 0
+                  limit:
+                    type: integer
+                    example: 50
+                  filters_active:
+                    type: object
+                    properties:
+                      level:
+                        type: string
+                        nullable: true
+                      model_id:
+                        type: string
+                        nullable: true
+                      time_range:
+                        type: array
+                        items:
+                          type: number
+                          nullable: true
+        '500':
+          description: 服务器错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
+  /logs/summary:
+    get:
+      tags:
+        - 监控
+      summary: 获取日志摘要信息
+      description: 获取日志统计摘要信息
+      responses:
+        '200':
+          description: 成功返回日志摘要
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_logs:
+                    type: integer
+                    example: 5782
+                  level_distribution:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                    example:
+                      INFO: 4500
+                      WARNING: 1200
+                      ERROR: 82
+                  model_distribution:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                    example:
+                      sentiment_analysis: 2300
+                      image_classification: 1450
+                      text_generation: 2032
+                  time_range:
+                    type: object
+                    properties:
+                      earliest:
+                        type: string
+                        format: date-time
+                      latest:
+                        type: string
+                        format: date-time
+                  cache_usage:
+                    type: string
+                    example: '5782/10000'
+        '500':
+          description: 服务器错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
+  /logs/clear:
+    post:
+      tags:
+        - 监控
+      summary: 清空日志缓存
+      description: 清空内存中的日志缓存
+      responses:
+        '200':
+          description: 日志清空成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: 'Logs cleared successfully'
+        '500':
+          description: 服务器错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
+  # 告警API
+  /alerts:
+    get:
+      tags:
+        - 监控
+      summary: 获取当前告警
+      description: 获取系统中所有活跃的告警信息
+      responses:
+        '200':
+          description: 成功获取告警信息
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      description: 告警名称
+                    type:
+                      type: string
+                      description: 告警类型
+                    level:
+                      type: string
+                      description: 告警级别(INFO, WARNING, CRITICAL)
+                    message:
+                      type: string
+                      description: 告警详细信息
+                    value:
+                      type: number
+                      description: 当前值
+                    threshold:
+                      type: number
+                      description: 告警阈值
+                    active:
+                      type: boolean
+                      description: 告警是否活跃
+                    model_id:
+                      type: string
+                      description: 相关模型ID
+                    since:
+                      type: string
+                      description: 告警开始时间(ISO 8601格式)
+        '500':
+          description: 服务器错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /alerts/config:
+    get:
+      tags:
+        - 监控
+      summary: 获取告警配置
+      description: 获取当前系统告警阈值配置
+      responses:
+        '200':
+          description: 成功获取告警配置
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    description: 操作状态
+                  config:
+                    type: object
+                    properties:
+                      cpu_threshold:
+                        type: number
+                        description: CPU使用率告警阈值(百分比)
+                      memory_threshold:
+                        type: number
+                        description: 内存使用率告警阈值(百分比)
+                      disk_threshold:
+                        type: number
+                        description: 磁盘使用率告警阈值(百分比)
+        '500':
+          description: 服务器错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+                
+    post:
+      tags:
+        - 监控
+      summary: 更新告警配置
+      description: 更新系统告警阈值配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cpu_threshold:
+                  type: number
+                  description: CPU使用率告警阈值(百分比,0-100)
+                memory_threshold:
+                  type: number
+                  description: 内存使用率告警阈值(百分比,0-100)
+                disk_threshold:
+                  type: number
+                  description: 磁盘使用率告警阈值(百分比,0-100)
+      responses:
+        '200':
+          description: 成功更新告警配置
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    description: 操作状态
+                  message:
+                    type: string
+                    description: 操作结果信息
+                  config:
+                    type: object
+                    description: 更新后的配置
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: 服务器错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   schemas:
     Error:

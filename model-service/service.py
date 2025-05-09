@@ -14,12 +14,15 @@ from kafka_client import KafkaClient
 from flask import jsonify
 from prometheus_client import Counter, Histogram, Gauge
 from alert_rules import AlertRules
+from log_manager import LogManager
 
 class MLService:
     def __init__(self):
         self.model_registry: Dict[str, Dict[str, Any]] = {}  # model_id -> {model, metadata}
-        self.kafka_client = KafkaClient()
+        self.log_manager = LogManager(max_cache_size=50000)  # 初始化日志管理器
+        self.kafka_client = KafkaClient(log_callback=self.log_manager.add_log)  # 传递日志回调
         self.alert_rules = AlertRules()
+        self.start_time = time.time()  # 记录服务启动时间
         
         # 存储模型服务进程
         self.model_processes: Dict[str, Dict[str, Any]] = {}
@@ -39,6 +42,9 @@ class MLService:
         
         # 创建port_mappings目录
         os.makedirs("port_mappings", exist_ok=True)
+        
+        # 存储活跃告警
+        self.active_alerts: List[Dict[str, Any]] = []
         
         # 加载模型注册表
         self._sync_model_registry()
@@ -418,19 +424,85 @@ class MLService:
                 )
                 
                 if response.status_code == 200:
-                    return response.json(), 200
+                    # 从独立服务预测成功，记录日志
+                    response_data = response.json()
+                    try:
+                        # 提取响应中的预测值和延迟
+                        prediction = response_data.get("prediction", 0.0)
+                        latency = response_data.get("latency", 0.0)
+                        
+                        # 记录日志
+                        log_data = {
+                            "model_id": model_id,
+                            "prediction": prediction,
+                            "latency": latency,
+                            "features": data.get("features", []),
+                            "timestamp": time.time(),
+                            "level": "INFO" if latency < 1.0 else "WARNING",
+                            "message": f"Service prediction for model {model_id} completed in {latency:.3f}s"
+                        }
+                        # 直接添加到日志管理器
+                        self.log_manager.add_log(log_data)
+                        
+                        # 尝试通过Kafka发送
+                        kafka_enabled = os.environ.get('KAFKA_ENABLED', 'false').lower() == 'true'
+                        if kafka_enabled:
+                            self.kafka_client.send_log(log_data)
+                    except Exception as log_err:
+                        logging.warning(f"Failed to log service prediction: {str(log_err)}")
+                        
+                    return response_data, 200
                 else:
                     error_msg = response.json().get('error', 'Unknown error')
+                    
+                    # 记录错误日志
+                    log_data = {
+                        "model_id": model_id,
+                        "error": error_msg,
+                        "features": data.get("features", []),
+                        "timestamp": time.time(),
+                        "level": "ERROR",
+                        "message": f"Service prediction error for model {model_id}: {error_msg}"
+                    }
+                    # 直接添加到日志管理器
+                    self.log_manager.add_log(log_data)
+                    
                     return {"error": f"Prediction service error: {error_msg}"}, response.status_code
             
             except Exception as e:
                 logging.error(f"Error forwarding prediction to service: {str(e)}")
+                
+                # 记录服务连接错误日志
+                log_data = {
+                    "model_id": model_id,
+                    "error": str(e),
+                    "features": data.get("features", []),
+                    "timestamp": time.time(),
+                    "level": "ERROR",
+                    "message": f"Service connection error for model {model_id}: {str(e)}"
+                }
+                # 直接添加到日志管理器
+                self.log_manager.add_log(log_data)
+                
                 return {"error": f"Failed to reach prediction service: {str(e)}"}, 500
         
         # 如果服务未部署或不可用，尝试使用本地模型
         if not self._check_model_file_exists(model_id):
             if model_id in self.model_registry:
                 del self.model_registry[model_id]  # 如果文件丢失，从注册表中删除
+                
+            # 记录模型文件缺失错误
+            log_data = {
+                "model_id": model_id,
+                "error": "Model file not found",
+                "features": data.get("features", []),
+                "timestamp": time.time(),
+                "level": "ERROR",
+                "message": f"Model file not found for {model_id}"
+            }
+            # 直接添加到日志管理器
+            self.log_manager.add_log(log_data)
+            
             return {"error": "Model file not found"}, 404
 
         start_time = time.time()
@@ -438,6 +510,18 @@ class MLService:
             # 获取模型和元数据
             model_info = self.model_registry.get(model_id)
             if not model_info:
+                # 记录模型未注册错误
+                log_data = {
+                    "model_id": model_id,
+                    "error": "Model not registered",
+                    "features": data.get("features", []),
+                    "timestamp": time.time(),
+                    "level": "ERROR",
+                    "message": f"Model {model_id} not registered"
+                }
+                # 直接添加到日志管理器
+                self.log_manager.add_log(log_data)
+                
                 return {"error": "Model not registered"}, 404
 
             model = model_info['model']
@@ -460,6 +544,28 @@ class MLService:
                 },
                 "note": "Using local model (service not deployed)"
             }
+
+            # 记录预测日志
+            try:
+                # 直接添加到日志管理器
+                log_data = {
+                    "model_id": model_id,
+                    "prediction": prediction,
+                    "latency": latency,
+                    "features": data.get("features", []),
+                    "timestamp": time.time(),
+                    "level": "INFO" if latency < 1.0 else "WARNING",
+                    "message": f"Local prediction for model {model_id} completed in {latency:.3f}s"
+                }
+                self.log_manager.add_log(log_data)
+                
+                # 尝试通过Kafka发送
+                kafka_enabled = os.environ.get('KAFKA_ENABLED', 'false').lower() == 'true'
+                if kafka_enabled:
+                    self.kafka_client.send_log(log_data)
+                    
+            except Exception as log_err:
+                logging.warning(f"Failed to log prediction: {str(log_err)}")
 
             return result, 200
         except Exception as e:
@@ -623,15 +729,123 @@ class MLService:
     def _log_prediction(self, model_id: str, prediction: float, latency: float, features: list):
         """记录预测信息"""
         try:
+            # 检查Kafka是否启用
+            kafka_enabled = os.environ.get('KAFKA_ENABLED', 'false').lower() == 'true'
+            if not kafka_enabled:
+                logging.debug(f"Kafka logging disabled by environment variable")
+                return
+                
             # 使用Kafka记录预测结果
             log_data = {
                 "model_id": model_id,
                 "prediction": prediction,
                 "latency": latency,
                 "features": features,
-                "timestamp": time.time()
+                "timestamp": time.time(),
+                "level": "INFO" if latency < 1.0 else "WARNING",
+                "message": f"Prediction for model {model_id} completed in {latency:.3f}s"
             }
-            self.kafka_client.send_message("inference-logs", log_data)
+            self.kafka_client.send_log(log_data)
+            
+            # 直接添加到日志管理器
+            self.log_manager.add_log(log_data)
         except Exception as e:
             logging.error(f"Failed to log prediction: {e}")
             # 错误不影响主业务逻辑，所以只记录不抛出 
+
+    def get_active_alerts(self) -> List[Dict[str, Any]]:
+        """
+        获取当前活跃的告警列表，使用真实的系统资源监控数据
+        
+        返回:
+            List[Dict[str, Any]]: 告警列表，每个告警包含以下字段：
+                - name: 告警名称
+                - level: 告警级别 (CRITICAL, WARNING, INFO)
+                - message: 告警消息
+                - type: 告警类型
+                - value: 当前值
+                - threshold: 阈值
+                - active: 是否活跃
+                - model_id: 相关模型ID
+                - timestamp: 告警时间戳
+        """
+        # 清除所有现有告警，确保使用最新的阈值重新评估
+        self.active_alerts = []
+        
+        # 检查所有已注册模型的状态，生成系统检查告警
+        for model_id, model_info in self.model_registry.items():
+            # 检查模型资源使用情况
+            try:
+                # 获取真实资源使用情况
+                if model_id in self.model_processes:
+                    process_info = self.model_processes[model_id]
+                    if process_info.get('status') == 'running' and 'process' in process_info:
+                        process = process_info['process']
+                        
+                        # 确保进程对象可用，并获取其PID
+                        if hasattr(process, 'pid'):
+                            try:
+                                # 使用psutil获取进程的真实CPU和内存使用率
+                                psutil_process = psutil.Process(process.pid)
+                                
+                                # 获取CPU使用率
+                                cpu_usage = psutil_process.cpu_percent(interval=0.1)
+                                
+                                # 获取内存使用率
+                                memory_usage = psutil_process.memory_percent()
+                                
+                                # 检查资源使用情况并生成告警
+                                resource_alerts = self.alert_rules.check_resource_usage(model_id, cpu_usage, memory_usage)
+                                
+                                # 将生成的资源告警添加到活跃告警列表
+                                for alert in resource_alerts:
+                                    self.active_alerts.append({
+                                        "name": f"{alert['type'].replace('_', ' ').title()}",
+                                        "level": alert['level'],
+                                        "message": alert['message'],
+                                        "type": alert['type'],
+                                        "value": cpu_usage if 'cpu' in alert['type'] else memory_usage,
+                                        "threshold": self.alert_rules.config.get_config('resource_rules')['cpu_threshold' if 'cpu' in alert['type'] else 'memory_threshold'],
+                                        "active": True,
+                                        "model_id": model_id,
+                                        "timestamp": time.time(),
+                                        "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                                    })
+                            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+                                logging.warning(f"无法获取进程 {process.pid} 的资源使用情况: {str(e)}")
+                
+                # 如果无法从模型进程获取数据，使用系统整体资源数据检查
+                if model_id not in self.model_processes or 'process' not in self.model_processes[model_id]:
+                    # 获取系统整体资源使用情况
+                    system_cpu_usage = psutil.cpu_percent(interval=0.1)
+                    system_memory_usage = psutil.virtual_memory().percent
+                    
+                    # 对整体系统数据进行检查
+                    system_alerts = self.alert_rules.check_resource_usage(
+                        f"{model_id}_system", system_cpu_usage, system_memory_usage)
+                    
+                    # 将系统告警添加到列表
+                    for alert in system_alerts:
+                        self.active_alerts.append({
+                            "name": f"System {alert['type'].replace('_', ' ').title()}",
+                            "level": alert['level'],
+                            "message": f"System {alert['message'].lower()}",
+                            "type": f"system_{alert['type']}",
+                            "value": system_cpu_usage if 'cpu' in alert['type'] else system_memory_usage,
+                            "threshold": self.alert_rules.config.get_config('resource_rules')['cpu_threshold' if 'cpu' in alert['type'] else 'memory_threshold'],
+                            "active": True,
+                            "model_id": model_id,
+                            "timestamp": time.time(),
+                            "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                        })
+            except Exception as e:
+                logging.error(f"获取模型 {model_id} 资源使用情况时出错: {str(e)}", exc_info=True)
+        
+        # 移除过期的告警（例如，超过30分钟的告警）
+        current_time = time.time()
+        self.active_alerts = [
+            alert for alert in self.active_alerts 
+            if current_time - alert.get('timestamp', 0) < 1800  # 30分钟
+        ]
+        
+        return self.active_alerts 

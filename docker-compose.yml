@@ -42,7 +42,7 @@ services:
       - ./model-service:/app
     environment:
       - PROMETHEUS_MULTIPROC_DIR=/tmp
-      - KAFKA_ENABLED=false
+      - KAFKA_ENABLED=true
       - MODEL_SERVICE_PORT_START=8000
       - MODEL_SERVICE_PORT_END=8100
     command: python app.py
