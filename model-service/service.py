@@ -772,10 +772,18 @@ class MLService:
         # 清除所有现有告警，确保使用最新的阈值重新评估
         self.active_alerts = []
         
+        # 获取系统整体资源使用情况 - 始终获取系统整体资源数据
+        system_cpu_usage = psutil.cpu_percent(interval=0.1)
+        system_memory_usage = psutil.virtual_memory().percent
+        system_disk_usage = psutil.disk_usage('/').percent
+        
         # 检查所有已注册模型的状态，生成系统检查告警
         for model_id, model_info in self.model_registry.items():
             # 检查模型资源使用情况
             try:
+                # 标记是否已检查模型特定的资源使用情况
+                checked_model_resources = False
+                
                 # 获取真实资源使用情况
                 if model_id in self.model_processes:
                     process_info = self.model_processes[model_id]
@@ -811,33 +819,66 @@ class MLService:
                                         "timestamp": time.time(),
                                         "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                                     })
+                                
+                                checked_model_resources = True
+                                
+                                # 即使检查了模型资源，也添加对系统整体资源的检查
+                                # 这确保即使模型资源使用率为0也能检测到系统级别的高资源使用率
                             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
                                 logging.warning(f"无法获取进程 {process.pid} 的资源使用情况: {str(e)}")
                 
-                # 如果无法从模型进程获取数据，使用系统整体资源数据检查
-                if model_id not in self.model_processes or 'process' not in self.model_processes[model_id]:
-                    # 获取系统整体资源使用情况
-                    system_cpu_usage = psutil.cpu_percent(interval=0.1)
-                    system_memory_usage = psutil.virtual_memory().percent
-                    
-                    # 对整体系统数据进行检查
-                    system_alerts = self.alert_rules.check_resource_usage(
-                        f"{model_id}_system", system_cpu_usage, system_memory_usage)
-                    
-                    # 将系统告警添加到列表
-                    for alert in system_alerts:
-                        self.active_alerts.append({
-                            "name": f"System {alert['type'].replace('_', ' ').title()}",
-                            "level": alert['level'],
-                            "message": f"System {alert['message'].lower()}",
-                            "type": f"system_{alert['type']}",
-                            "value": system_cpu_usage if 'cpu' in alert['type'] else system_memory_usage,
-                            "threshold": self.alert_rules.config.get_config('resource_rules')['cpu_threshold' if 'cpu' in alert['type'] else 'memory_threshold'],
-                            "active": True,
-                            "model_id": model_id,
-                            "timestamp": time.time(),
-                            "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                        })
+                # 使用系统整体资源数据进行检查 - 现在对每个模型都执行此检查，无论特定模型进程是否可用
+                # 系统CPU使用率检查
+                resource_rules = self.alert_rules.config.get_config('resource_rules')
+                cpu_threshold = resource_rules.get('cpu_threshold', 80.0)
+                memory_threshold = resource_rules.get('memory_threshold', 85.0)
+                disk_threshold = resource_rules.get('disk_threshold', 90.0)
+                
+                # 检查CPU使用率
+                if system_cpu_usage > cpu_threshold:
+                    self.active_alerts.append({
+                        "name": "System CPU Usage",
+                        "level": "WARNING",
+                        "message": f"System CPU usage ({system_cpu_usage:.1f}%) exceeds threshold ({cpu_threshold}%)",
+                        "type": "system_cpu_usage",
+                        "value": system_cpu_usage,
+                        "threshold": cpu_threshold,
+                        "active": True,
+                        "model_id": model_id,
+                        "timestamp": time.time(),
+                        "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    })
+                
+                # 检查内存使用率
+                if system_memory_usage > memory_threshold:
+                    self.active_alerts.append({
+                        "name": "System Memory Usage",
+                        "level": "WARNING",
+                        "message": f"System memory usage ({system_memory_usage:.1f}%) exceeds threshold ({memory_threshold}%)",
+                        "type": "system_memory_usage",
+                        "value": system_memory_usage,
+                        "threshold": memory_threshold,
+                        "active": True,
+                        "model_id": model_id,
+                        "timestamp": time.time(),
+                        "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    })
+                
+                # 检查磁盘使用率
+                if system_disk_usage > disk_threshold:
+                    self.active_alerts.append({
+                        "name": "System Disk Usage",
+                        "level": "WARNING",
+                        "message": f"System disk usage ({system_disk_usage:.1f}%) exceeds threshold ({disk_threshold}%)",
+                        "type": "system_disk_usage",
+                        "value": system_disk_usage,
+                        "threshold": disk_threshold,
+                        "active": True,
+                        "model_id": model_id,
+                        "timestamp": time.time(),
+                        "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    })
+                
             except Exception as e:
                 logging.error(f"获取模型 {model_id} 资源使用情况时出错: {str(e)}", exc_info=True)
         

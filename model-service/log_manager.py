@@ -39,6 +39,36 @@ class LogManager:
         with self.lock:
             self.logs.append(log_data)
     
+    def _ensure_numeric_timestamp(self, ts):
+        """确保时间戳是数字格式"""
+        if ts is None:
+            return 0
+            
+        if isinstance(ts, (int, float)):
+            return ts
+            
+        if isinstance(ts, str):
+            try:
+                # 尝试解析ISO格式的字符串时间戳
+                # 处理ISO格式的Z结尾和时区信息
+                if ts.endswith('Z'):
+                    ts = ts[:-1] + '+00:00'
+                elif '+' not in ts and '-' not in ts[10:]:  # 确保不是负数日期且没有时区信息
+                    ts = ts + '+00:00'
+                    
+                dt = datetime.fromisoformat(ts)
+                return dt.timestamp()
+            except (ValueError, TypeError):
+                logging.warning(f"无法解析时间戳字符串: {ts}, 使用0作为默认值")
+                return 0
+                
+        # 对于其他类型，尝试转换为浮点数
+        try:
+            return float(ts)
+        except (ValueError, TypeError):
+            logging.warning(f"无法将类型 {type(ts)} 的值 {ts} 转换为数字时间戳, 使用0作为默认值")
+            return 0
+            
     def query_logs(self, 
                   limit: int = 50, 
                   offset: int = 0, 
@@ -46,7 +76,7 @@ class LogManager:
                   model_id: Optional[str] = None,
                   start_time: Optional[float] = None,
                   end_time: Optional[float] = None,
-                  query: Optional[str] = None) -> List[Dict[str, Any]]:
+                  query: Optional[str] = None) -> Dict[str, Any]:
         """
         查询日志
         
@@ -62,41 +92,64 @@ class LogManager:
         Returns:
             符合条件的日志列表
         """
+        # 确保时间戳是数字类型
+        numeric_start_time = self._ensure_numeric_timestamp(start_time) if start_time is not None else None
+        numeric_end_time = self._ensure_numeric_timestamp(end_time) if end_time is not None else None
+        
         with self.lock:
-            # 过滤日志
-            filtered_logs = list(self.logs)
+            # 复制日志列表，避免在处理过程中修改原始数据
+            filtered_logs = []
             
-            if level:
-                filtered_logs = [log for log in filtered_logs if log.get('level', '').upper() == level.upper()]
+            # 处理每条日志记录
+            for log in self.logs:
+                # 创建日志副本
+                log_copy = log.copy()
                 
-            if model_id:
-                filtered_logs = [log for log in filtered_logs if log.get('model_id') == model_id]
+                # 确保日志中的时间戳是数字类型，用于比较
+                numeric_log_timestamp = self._ensure_numeric_timestamp(log_copy.get('timestamp', 0))
                 
-            if start_time:
-                filtered_logs = [log for log in filtered_logs if log.get('timestamp', 0) >= start_time]
+                # 应用过滤条件
+                if level and log_copy.get('level', '').upper() != level.upper():
+                    continue
+                    
+                if model_id and log_copy.get('model_id') != model_id:
+                    continue
+                    
+                if numeric_start_time is not None and numeric_log_timestamp < numeric_start_time:
+                    continue
+                    
+                if numeric_end_time is not None and numeric_log_timestamp > numeric_end_time:
+                    continue
+                    
+                if query:
+                    query_lower = query.lower()
+                    message = str(log_copy.get('message', '')).lower()
+                    context = str(log_copy.get('context', {})).lower()
+                    
+                    if query_lower not in message and query_lower not in context:
+                        continue
                 
-            if end_time:
-                filtered_logs = [log for log in filtered_logs if log.get('timestamp', 0) <= end_time]
-                
-            if query:
-                query = query.lower()
-                filtered_logs = [log for log in filtered_logs if 
-                               query in str(log.get('message', '')).lower() or 
-                               query in str(log.get('context', {})).lower()]
+                # 将日志记录添加到结果中
+                filtered_logs.append(log_copy)
             
             # 按时间戳倒序排序（最新的日志在前）
-            filtered_logs.sort(key=lambda log: log.get('timestamp', 0), reverse=True)
+            # 确保排序键是数字类型
+            filtered_logs.sort(
+                key=lambda log: self._ensure_numeric_timestamp(log.get('timestamp', 0)), 
+                reverse=True
+            )
             
             # 分页
             total = len(filtered_logs)
             paginated_logs = filtered_logs[offset:offset + limit] if offset < total else []
             
-            # 处理日志格式，确保timestamp是ISO格式的字符串
+            # 处理日志格式，确保timestamp是ISO格式的字符串用于输出
             for log in paginated_logs:
-                if 'timestamp' in log and isinstance(log['timestamp'], (int, float)):
+                if 'timestamp' in log:
+                    timestamp = self._ensure_numeric_timestamp(log['timestamp'])
                     # 转换为ISO格式的字符串
                     log['timestamp'] = datetime.fromtimestamp(
-                        log['timestamp'], tz=timezone.utc
+                        timestamp, tz=timezone.utc
                     ).isoformat()
             
             return {
