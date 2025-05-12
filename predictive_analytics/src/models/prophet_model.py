@@ -12,6 +12,8 @@ from .base_model import BaseModel
 from ..config import PROPHET_CONFIG
 import joblib
 import os
+import pytz
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -96,18 +98,28 @@ class ProphetModel(BaseModel):
             # 确保数据按时间排序
             metric_data = metric_data.sort_values('timestamp')
             
-            # 准备Prophet所需的数据格式
-            prophet_data = pd.DataFrame({
-                'ds': metric_data['timestamp'],
-                'y': metric_data['value']
-            })
-            
-            # 检查是否有足够的数据点
-            if len(prophet_data) < self.config.get('min_train_samples', 8):
-                logger.warning(f"Not enough data for metric {metric}: {len(prophet_data)} samples")
-                continue
-                
             try:
+                # 确保时间戳是datetime类型并处理时区
+                metric_data['timestamp'] = pd.to_datetime(metric_data['timestamp'])
+                
+                # 如果时间戳没有时区信息，添加UTC时区
+                if metric_data['timestamp'].dt.tz is None:
+                    metric_data['timestamp'] = metric_data['timestamp'].dt.tz_localize('UTC')
+                # 如果时间戳已有时区信息但不是UTC，转换为UTC
+                elif str(metric_data['timestamp'].dt.tz) != 'UTC':
+                    metric_data['timestamp'] = metric_data['timestamp'].dt.tz_convert('UTC')
+                
+                # 移除时区信息用于Prophet（Prophet不支持时区）
+                prophet_data = pd.DataFrame({
+                    'ds': metric_data['timestamp'].dt.tz_localize(None),
+                    'y': metric_data['value']
+                })
+                
+                # 检查是否有足够的数据点
+                if len(prophet_data) < self.config.get('min_train_samples', 8):
+                    logger.warning(f"Not enough data for metric {metric}: {len(prophet_data)} samples")
+                    continue
+                    
                 # 创建并训练Prophet模型
                 model = Prophet(
                     growth=self.config.get('growth', 'linear'),
@@ -125,6 +137,12 @@ class ProphetModel(BaseModel):
                 
             except Exception as e:
                 logger.error(f"Error training model for metric {metric}: {str(e)}")
+                continue
+                
+        # 保存训练好的模型
+        if self.models:
+            self.save_model()
+            logger.info("All models trained and saved successfully")
     
     def predict(self, horizon: int = 30) -> pd.DataFrame:
         """
@@ -148,10 +166,20 @@ class ProphetModel(BaseModel):
         
         all_predictions = []
         
+        # 使用UTC时间作为起始点
+        start_time = datetime.now(pytz.UTC)
+        
         for metric_name, model in self.models.items():
             try:
-                # 创建未来时间点
-                future = model.make_future_dataframe(periods=periods, freq='5min')
+                # 创建未来时间点（不带时区）
+                future_dates = pd.date_range(
+                    start=start_time.replace(tzinfo=None),
+                    periods=periods,
+                    freq='5min'
+                )
+                
+                # 创建未来数据框
+                future = pd.DataFrame({'ds': future_dates})
                 
                 # 进行预测
                 forecast = model.predict(future)
@@ -159,9 +187,43 @@ class ProphetModel(BaseModel):
                 # 获取预测的最后一个periods部分
                 forecast = forecast.iloc[-periods:].copy()
                 
-                # 将预测添加到结果中
+                # 根据指标类型设置最小值和处理方式
+                if metric_name in ['latency_avg', 'latency_p95', 'latency_p99']:
+                    # 对于延迟指标，使用指数变换来确保正值
+                    forecast['yhat'] = np.exp(forecast['yhat'])
+                    forecast['yhat_lower'] = np.exp(forecast['yhat_lower'])
+                    forecast['yhat_upper'] = np.exp(forecast['yhat_upper'])
+                    
+                    # 设置合理的最小值（毫秒级别）
+                    min_values = {
+                        'latency_avg': 0.005,    # 平均延迟最小5ms
+                        'latency_p95': 0.010,    # P95延迟最小10ms
+                        'latency_p99': 0.015     # P99延迟最小15ms
+                    }
+                    min_value = min_values.get(metric_name, 0.005)
+                    
+                else:
+                    # 对于其他指标使用原来的最小值
+                    min_values = {
+                        'cpu_usage_real': 0.1,      # CPU使用率最小0.1%
+                        'memory_usage_real': 1.0,    # 内存使用率最小1%
+                        'network_io_real': 1.0,      # 网络I/O最小1
+                        'requests_total': 0.0        # 请求数最小0
+                    }
+                    min_value = min_values.get(metric_name, 0)
+                
+                # 应用最小值限制
+                forecast['yhat'] = forecast['yhat'].clip(lower=min_value)
+                forecast['yhat_lower'] = forecast['yhat_lower'].clip(lower=min_value)
+                forecast['yhat_upper'] = forecast['yhat_upper'].clip(lower=min_value)
+                
+                # 确保上界大于下界和预测值
+                forecast['yhat_upper'] = forecast[['yhat_upper', 'yhat', 'yhat_lower']].max(axis=1)
+                forecast['yhat_lower'] = forecast[['yhat_lower', 'yhat']].min(axis=1)
+                
+                # 将预测添加到结果中，添加UTC时区
                 result = pd.DataFrame({
-                    'timestamp': forecast['ds'],
+                    'timestamp': pd.to_datetime(forecast['ds']).dt.tz_localize('UTC'),
                     f'{metric_name}': forecast['yhat'],
                     f'{metric_name}_lower': forecast['yhat_lower'],
                     f'{metric_name}_upper': forecast['yhat_upper']
@@ -178,7 +240,9 @@ class ProphetModel(BaseModel):
         # 合并所有预测
         predictions = all_predictions[0]
         for pred in all_predictions[1:]:
-            predictions = predictions.merge(pred, on='timestamp', how='outer')
+            predictions = predictions.merge(pred.drop('timestamp', axis=1), 
+                                         left_index=True, 
+                                         right_index=True)
             
         # 确保没有缺失值
         predictions = predictions.fillna(0)
@@ -383,54 +447,49 @@ class ProphetModel(BaseModel):
             logger.error(f"Error loading model: {str(e)}")
             raise RuntimeError(f"Failed to load model: {str(e)}")
             
-    def save_model(self) -> None:
-        """Save Prophet models to cache directory"""
-        if not self.is_trained:
-            logger.warning("Cannot save untrained models")
-            return
-            
-        try:
-            cache_dir = self.config.get('cache_dir', 'cache')
-            os.makedirs(cache_dir, exist_ok=True)
-            
-            model_path = f"{cache_dir}/prophet_model.joblib"
-            
-            model_data = {
-                'models': self.models,
-                'config': self.config,
-                'is_trained': self.is_trained
-            }
-            
-            joblib.dump(model_data, model_path)
-            logger.info(f"Prophet models saved to {model_path}")
-            
-        except Exception as e:
-            logger.error(f"Error saving Prophet models: {str(e)}")
-            raise
-    
-    def load_model(self) -> bool:
+    def save_model(self) -> bool:
         """
-        Load Prophet models from cache directory
+        Save trained models to disk
         
         Returns:
-            True if models were loaded successfully
+            bool: True if successful, False otherwise
         """
         try:
-            cache_dir = self.config.get('cache_dir', 'cache')
-            model_path = f"{cache_dir}/prophet_model.joblib"
+            # Create models directory if it doesn't exist
+            models_dir = Path("models")
+            models_dir.mkdir(exist_ok=True)
             
-            if not os.path.exists(model_path):
-                logger.info(f"No cached model found at {model_path}")
-                return False
+            # Save each model
+            for metric_name, model in self.models.items():
+                model_path = models_dir / f"{metric_name}.joblib"
+                joblib.dump(model, model_path)
             
-            model_data = joblib.load(model_path)
-            self.models = model_data['models']
-            self.config = model_data['config']
-            self.is_trained = model_data['is_trained']
-            
-            logger.info("Prophet models loaded successfully")
             return True
             
         except Exception as e:
-            logger.error(f"Error loading Prophet models: {str(e)}")
+            logger.error(f"Error saving models: {str(e)}")
+            return False
+    
+    def load_model(self) -> bool:
+        """
+        Load trained models from disk
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Check if models directory exists
+            models_dir = Path("models")
+            if not models_dir.exists():
+                return False
+            
+            # Load each model
+            for model_file in models_dir.glob("*.joblib"):
+                metric_name = model_file.stem
+                self.models[metric_name] = joblib.load(model_file)
+            
+            return len(self.models) > 0
+            
+        except Exception as e:
+            logger.error(f"Error loading models: {str(e)}")
             return False 

@@ -11,6 +11,7 @@ import json
 import os
 import time
 import threading
+import pytz
 
 from ..collectors import CollectorFactory
 from ..models import ModelFactory
@@ -113,12 +114,11 @@ def predict():
         horizon = data.get('horizon', 30)
         use_cache = data.get('use_cache', True)
         
-        # Collect metrics
-        start_time = time.time()
-        end_time = datetime.now()
+        # 使用UTC时间
+        end_time = datetime.now(pytz.UTC)
         metrics_start_time = end_time - timedelta(hours=24)
         metrics_df = collector.collect_metrics(metrics_start_time, end_time)
-        logger.info(f"Metrics collection completed in {time.time() - start_time:.2f} seconds")
+        logger.info("Metrics collection completed")
         
         # 检查是否存在实时系统资源指标数据
         real_metrics = [metric for metric in metrics_df['metric_name'].unique() 
@@ -158,11 +158,32 @@ def predict():
         )
         logger.info(f"Resource optimization completed in {time.time() - optimization_start:.2f} seconds")
         
-        # Export results
+        # Export results with UTC timestamps
         export_start = time.time()
+        
+        # 确保预测结果中的时间戳是UTC时间
+        if isinstance(predictions_df, pd.DataFrame):
+            if 'timestamp' in predictions_df.columns:
+                # 如果时间戳没有时区信息，添加UTC时区
+                if predictions_df['timestamp'].dt.tz is None:
+                    predictions_df['timestamp'] = predictions_df['timestamp'].dt.tz_localize('UTC')
+                # 如果时间戳已有时区信息但不是UTC，转换为UTC
+                elif str(predictions_df['timestamp'].dt.tz) != 'UTC':
+                    predictions_df['timestamp'] = predictions_df['timestamp'].dt.tz_convert('UTC')
+                    
+                predictions_dict = predictions_df.to_dict(orient='records')
+                # 转换时间戳为ISO格式
+                for pred in predictions_dict:
+                    if 'timestamp' in pred:
+                        pred['timestamp'] = pred['timestamp'].isoformat()
+            else:
+                predictions_dict = predictions_df.to_dict(orient='records')
+        else:
+            predictions_dict = predictions_df
+            
         export_data = {
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'predictions': predictions_df.to_dict(orient='records') if isinstance(predictions_df, pd.DataFrame) else predictions_df,
+            'timestamp': datetime.now(pytz.UTC).isoformat(),
+            'predictions': predictions_dict,
             'optimization': optimization_result
         }
         
@@ -177,13 +198,13 @@ def predict():
             if len(in_memory_cache['history']) > 100:  # 限制历史记录数量
                 in_memory_cache['history'].pop(0)
         
-        total_time = time.time() - start_time
+        total_time = time.time() - prediction_start
         logger.info(f"Total prediction pipeline completed in {total_time:.2f} seconds")
         
         return jsonify({
             'status': 'success',
             'data': {
-                'predictions': predictions_df.to_dict(orient='records') if isinstance(predictions_df, pd.DataFrame) else predictions_df,
+                'predictions': predictions_dict,
                 'optimization': optimization_result
             },
             'processing_time': f"{total_time:.2f} seconds"
